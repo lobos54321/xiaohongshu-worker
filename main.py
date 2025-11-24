@@ -5,6 +5,7 @@ from typing import Dict, Optional
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Header
 from pydantic import BaseModel
 from core.browser import BrowserManager
+from core.browser_pool import BrowserPool
 
 app = FastAPI(title="XHS Worker Service")
 
@@ -22,6 +23,9 @@ app.add_middleware(
 # === Configuration ===
 WORKER_SECRET = os.getenv("WORKER_SECRET", "default_secret_key")
 MAX_CONCURRENT_BROWSERS = asyncio.Semaphore(2)
+
+# === Browser Pool ===
+browser_pool = BrowserPool(max_size=3)  # Max 3 concurrent browsers
 
 # === Session Management ===
 # Store active login sessions: user_id -> {browser, qr_created_at}
@@ -84,20 +88,25 @@ async def get_login_qrcode(
 ):
     """
     Start a browser session and get the login QR code
+    Uses browser pool for performance (5-10s vs 60s)
     """
     if authorization != f"Bearer {WORKER_SECRET}":
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # If there's an existing session for this user, close it first
+    # If there's an existing session for this user, release it to pool
     if request.user_id in login_sessions:
         try:
-            login_sessions[request.user_id]["browser"].close()
+            await browser_pool.release(request.user_id, keep_alive=True)
         except:
             pass
         del login_sessions[request.user_id]
 
-    # Create new session with timestamp
-    manager = BrowserManager(request.user_id)
+    # Acquire browser from pool (reuse if available, else create new)
+    try:
+        manager = await browser_pool.acquire(request.user_id, request.proxy_url, request.user_agent)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Browser pool exhausted: {str(e)}")
+    
     login_sessions[request.user_id] = {
         "browser": manager,
         "qr_created_at": time.time()
@@ -113,8 +122,8 @@ async def get_login_qrcode(
     )
     
     if result.get("status") == "error":
-        # Cleanup on error
-        manager.close()
+        # Cleanup on error - close browser completely
+        await browser_pool.release(request.user_id, keep_alive=False)
         del login_sessions[request.user_id]
         raise HTTPException(status_code=500, detail=result.get("msg"))
         
@@ -182,4 +191,27 @@ async def check_login_status(
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "healthy", "service": "xhs-worker"}
+
+# === Browser Pool Lifecycle Management ===
+
+@app.on_event("startup")
+async def startup_event():
+    """Start periodic cleanup task for idle browsers"""
+    async def cleanup_loop():
+        while True:
+            await asyncio.sleep(300)  # Run every 5 minutes
+            print("🧹 Running periodic browser pool cleanup...")
+            await browser_pool.cleanup_idle(idle_timeout=300)
+    
+    # Start cleanup task in background
+    asyncio.create_task(cleanup_loop())
+    print("✅ Browser pool cleanup task started")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Close all browsers gracefully on shutdown"""
+    print("🔒 Shutting down - closing all browsers...")
+    await browser_pool.close_all()
+    print("✅ Shutdown complete")
+```
