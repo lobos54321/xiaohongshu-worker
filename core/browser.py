@@ -92,10 +92,31 @@ class BrowserManager:
             
             if not qr_img:
                 print(f"[{self.user_id}] 👀 SMS mode detected, switching to QR...")
-                # Try to find the switch button (usually top-right corner)
-                # Strategy: Look for div with class containing 'switch' or specific structure
-                switch_btn = page.ele('css:div[class*="switch"]', timeout=2)
+                # Try to find the switch button (usually top-right corner icon)
+                switch_btn = None
                 
+                # Strategy 1: Look for clickable SVG/IMG in the login area (most reliable)
+                try:
+                    # The switch button is usually a small icon in the login box header
+                    # Try finding any svg or img that's small and in the upper area
+                    login_area = page.ele('css:div[class*="login"]', timeout=2)
+                    if login_area:
+                        # Look for svg or img elements (the icon is usually SVG)
+                        icons = login_area.eles('tag:svg') + login_area.eles('tag:img')
+                        for icon in icons:
+                            try:
+                                # Filter by size - the switch icon is usually small (< 50px)
+                                rect = icon.rect
+                                if 10 < rect.width < 80 and 10 < rect.height < 80:
+                                    switch_btn = icon
+                                    print(f"[{self.user_id}] 🎯 Found potential switch icon: {rect.width}x{rect.height}")
+                                    break
+                            except:
+                                continue
+                except Exception as e:
+                    print(f"[{self.user_id}] ⚠️ Strategy 1 failed: {e}")
+                
+                # Strategy 2: Text anchor (fallback)
                 if not switch_btn:
                     # Fallback 1: Text anchor strategy (most robust against class obfuscation)
                     # Find "短信登录" (SMS Login) text, which is always present in SMS mode
