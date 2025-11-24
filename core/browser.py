@@ -1,12 +1,13 @@
 import os
 import time
 import shutil
-import random
 from DrissionPage import ChromiumPage, ChromiumOptions
 from pyvirtualdisplay import Display
 from .utils import download_video
 
 class BrowserManager:
+    """Manage Chromium browser instances for XHS operations"""
+    
     def __init__(self, user_id: str):
         self.user_id = user_id
         # === Enterprise Design: User Data Isolation ===
@@ -14,6 +15,7 @@ class BrowserManager:
         # In Zeabur, /app/data needs to be a mounted Volume
         # Use relative path to support both Docker (/app/data) and local dev
         self.user_data_dir = os.path.abspath(f"data/users/{user_id}")
+        print(f"[{self.user_id}] 📁 Using user_data_dir: {self.user_data_dir}")
         os.makedirs(self.user_data_dir, exist_ok=True)
         self.page = None
         self.display = None
@@ -52,17 +54,41 @@ class BrowserManager:
 
     def start_browser(self, proxy_url: str = None, user_agent: str = None):
         """Initialize browser session"""
+        # Clean up any existing browser first to prevent conflicts
         if self.page:
-            return self.page
+            print(f"[{self.user_id}] 🧹 Cleaning up existing browser before starting new one")
+            try:
+                self.page.quit()
+            except:
+                pass
+            self.page = None
+
+        # Clean up user data directory before starting a new session
+        # This ensures a fresh state for each login attempt or session
+        if os.path.exists(self.user_data_dir):
+            print(f"[{self.user_id}] 🗑️ Cleaning up user data directory: {self.user_data_dir}")
+            try:
+                shutil.rmtree(self.user_data_dir)
+            except Exception as e:
+                print(f"[{self.user_id}] ⚠️ Failed to clean user data directory: {e}")
+        os.makedirs(self.user_data_dir, exist_ok=True) # Recreate the directory
 
         # Start virtual display (Linux required)
         import platform
         if platform.system() == 'Linux':
+            try:
+                if self.display:
+                    self.display.stop()
+            except:
+                pass
             self.display = Display(visible=0, size=(1920, 1080))
             self.display.start()
+            print(f"[{self.user_id}] 🖥️ Started virtual display")
 
         co = self._get_options(proxy_url, user_agent)
+        print(f"[{self.user_id}] 🚀 Starting new browser instance...")
         self.page = ChromiumPage(co)
+        print(f"[{self.user_id}] ✅ Browser started successfully")
         return self.page
 
     def get_login_qrcode(self, proxy_url: str = None, user_agent: str = None):
@@ -71,14 +97,13 @@ class BrowserManager:
         """
         try:
             page = self.start_browser(proxy_url, user_agent)
-            
-            
-            print(f"[{self.user_id}] 🔍 Opening Creator Center login...")
+            # Open login page with extended timeout
+            print(f"[{self.user_id}] 🌐 Navigating to login page...")
             try:
-                page.get("https://creator.xiaohongshu.com/login", timeout=15)
-                page.wait.load_start()
-            except Exception as load_err:
-                print(f"[{self.user_id}] ⚠️  Page load timeout/error: {str(load_err)}")
+                page.get('https://creator.xiaohongshu.com/login', timeout=60)  # Increased from 15s to 60s
+                print(f"[{self.user_id}] ✅ Page loaded successfully")
+            except Exception as timeout_err:
+                print(f"[{self.user_id}] ⏱️ Page load timeout after 60s: {timeout_err}")
                 # Continue anyway - page might be partially loaded
                 time.sleep(3)
             
