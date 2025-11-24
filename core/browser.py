@@ -96,29 +96,33 @@ class BrowserManager:
                 # Aggressive strategy: Try multiple approaches to click the switch button
                 switched = False
                 
-                # Approach 1: Use JavaScript to find and click all small SVG/IMG elements
+                # Approach 1: Use JavaScript to find and click ALL small SVG/IMG elements
                 try:
                     js_click_script = """
                     // Find all SVG and IMG elements
                     const allIcons = [...document.querySelectorAll('svg'), ...document.querySelectorAll('img')];
-                    let clicked = false;
+                    let clickedCount = 0;
                     
                     for (let icon of allIcons) {
                         const rect = icon.getBoundingClientRect();
-                        // Look for small icons (10-80px)
+                        // Look for small icons (10-80px) - click ALL of them
                         if (rect.width > 10 && rect.width < 80 && rect.height > 10 && rect.height < 80) {
-                            // Try clicking it
-                            icon.click();
-                            clicked = true;
-                            console.log('Clicked icon:', rect.width, 'x', rect.height);
-                            break;
+                            try {
+                                icon.click();
+                                clickedCount++;
+                                console.log('Clicked icon:', rect.width, 'x', rect.height);
+                                // Small delay between clicks
+                                await new Promise(r => setTimeout(r, 200));
+                            } catch(e) {
+                                console.log('Failed to click:', e);
+                            }
                         }
                     }
-                    return clicked;
+                    return clickedCount;
                     """
                     result = page.run_js(js_click_script)
-                    print(f"[{self.user_id}] 🎯 JavaScript click result: {result}")
-                    time.sleep(2)
+                    print(f"[{self.user_id}] 🎯 Clicked {result} icons with JavaScript")
+                    time.sleep(3)
                     
                     # Check if switched
                     if "扫码登录" in page.html or "扫码" in page.html:
