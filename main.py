@@ -7,6 +7,17 @@ from core.browser import BrowserManager
 
 app = FastAPI(title="XHS Worker Service")
 
+# === CORS Configuration ===
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with specific frontend domain
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # === Configuration ===
 WORKER_SECRET = os.getenv("WORKER_SECRET", "default_secret_key")
 MAX_CONCURRENT_BROWSERS = asyncio.Semaphore(2)
