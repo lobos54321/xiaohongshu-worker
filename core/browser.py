@@ -178,8 +178,14 @@ class BrowserManager:
                 try:
                     # Check size - QR code should be reasonably large (e.g. > 100px)
                     rect = ele.rect
-                    # print(f"[{self.user_id}] 📏 Checking element size: {rect.width}x{rect.height}")
-                    return rect.width > 100 and rect.height > 100
+                    # Handle different rect attribute access methods
+                    if hasattr(rect, 'size'):
+                        return rect.size[0] > 100 and rect.size[1] > 100
+                    elif hasattr(rect, 'width'):
+                        return rect.width > 100 and rect.height > 100
+                    else:
+                        # Try as dict/tuple
+                        return rect[0] > 100 and rect[1] > 100
                 except Exception as e:
                     print(f"[{self.user_id}] ⚠️ Error checking element size: {e}")
                     return False
