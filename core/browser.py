@@ -99,26 +99,27 @@ class BrowserManager:
                 # Approach 1: Use JavaScript to find and click ALL small SVG/IMG elements
                 try:
                     js_click_script = """
-                    // Find all SVG and IMG elements
-                    const allIcons = [...document.querySelectorAll('svg'), ...document.querySelectorAll('img')];
-                    let clickedCount = 0;
-                    
-                    for (let icon of allIcons) {
-                        const rect = icon.getBoundingClientRect();
-                        // Look for small icons (10-80px) - click ALL of them
-                        if (rect.width > 10 && rect.width < 80 && rect.height > 10 && rect.height < 80) {
-                            try {
-                                icon.click();
-                                clickedCount++;
-                                console.log('Clicked icon:', rect.width, 'x', rect.height);
-                                // Small delay between clicks
-                                await new Promise(r => setTimeout(r, 200));
-                            } catch(e) {
-                                console.log('Failed to click:', e);
+                    (async function() {
+                        const allIcons = [...document.querySelectorAll('svg'), ...document.querySelectorAll('img')];
+                        let clickedCount = 0;
+                        
+                        for (let icon of allIcons) {
+                            const rect = icon.getBoundingClientRect();
+                            // Look for small icons (10-80px) - click ALL of them
+                            if (rect.width > 10 && rect.width < 80 && rect.height > 10 && rect.height < 80) {
+                                try {
+                                    icon.click();
+                                    clickedCount++;
+                                    console.log('Clicked icon:', rect.width, 'x', rect.height);
+                                    // Small delay between clicks
+                                    await new Promise(r => setTimeout(r, 200));
+                                } catch(e) {
+                                    console.log('Failed to click:', e);
+                                }
                             }
                         }
-                    }
-                    return clickedCount;
+                        return clickedCount;
+                    })();
                     """
                     result = page.run_js(js_click_script)
                     print(f"[{self.user_id}] 🎯 Clicked {result} icons with JavaScript")
@@ -140,9 +141,14 @@ class BrowserManager:
                             print(f"[{self.user_id}] 🔍 Found {len(icons)} icons in login area")
                             for icon in icons:
                                 try:
+                                    # Get bounding box - use size property instead of rect
                                     rect = icon.rect
-                                    if 10 < rect.width < 80 and 10 < rect.height < 80:
-                                        print(f"[{self.user_id}] 🖱️ Clicking icon: {rect.width}x{rect.height}")
+                                    # rect has properties: width, height, x, y - but access them as tuple indices
+                                    w = rect.size[0] if hasattr(rect, 'size') else rect.width
+                                    h = rect.size[1] if hasattr(rect, 'size') else rect.height
+                                    
+                                    if 10 < w < 80 and 10 < h < 80:
+                                        print(f"[{self.user_id}] 🖱️ Clicking icon: {w}x{h}")
                                         page.run_js("arguments[0].click()", icon)
                                         time.sleep(2)
                                         if "扫码登录" in page.html or "扫码" in page.html:
@@ -150,7 +156,7 @@ class BrowserManager:
                                             print(f"[{self.user_id}] ✅ Successfully switched")
                                             break
                                 except Exception as e:
-                                    print(f"[{self.user_id}] ⚠️ Failed to click icon: {e}")
+                                    print(f"[{self.user_id}] ⚠️ Failed to check/click icon: {e}")
                                     continue
                     except Exception as e:
                         print(f"[{self.user_id}] ⚠️ DrissionPage approach failed: {e}")
