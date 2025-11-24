@@ -214,4 +214,3 @@ async def shutdown_event():
     print("🔒 Shutting down - closing all browsers...")
     await browser_pool.close_all()
     print("✅ Shutdown complete")
-```
