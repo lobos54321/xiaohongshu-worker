@@ -92,95 +92,71 @@ class BrowserManager:
             
             if not qr_img:
                 print(f"[{self.user_id}] 👀 SMS mode detected, switching to QR...")
-                # Try to find the switch button (usually top-right corner icon)
-                switch_btn = None
                 
-                # Strategy 1: Look for clickable SVG/IMG in the login area (most reliable)
+                # Aggressive strategy: Try multiple approaches to click the switch button
+                switched = False
+                
+                # Approach 1: Use JavaScript to find and click all small SVG/IMG elements
                 try:
-                    # The switch button is usually a small icon in the login box header
-                    # Try finding any svg or img that's small and in the upper area
-                    login_area = page.ele('css:div[class*="login"]', timeout=2)
-                    if login_area:
-                        # Look for svg or img elements (the icon is usually SVG)
-                        icons = login_area.eles('tag:svg') + login_area.eles('tag:img')
-                        for icon in icons:
-                            try:
-                                # Filter by size - the switch icon is usually small (< 50px)
-                                rect = icon.rect
-                                if 10 < rect.width < 80 and 10 < rect.height < 80:
-                                    switch_btn = icon
-                                    print(f"[{self.user_id}] 🎯 Found potential switch icon: {rect.width}x{rect.height}")
-                                    break
-                            except:
-                                continue
+                    js_click_script = """
+                    // Find all SVG and IMG elements
+                    const allIcons = [...document.querySelectorAll('svg'), ...document.querySelectorAll('img')];
+                    let clicked = false;
+                    
+                    for (let icon of allIcons) {
+                        const rect = icon.getBoundingClientRect();
+                        // Look for small icons (10-80px)
+                        if (rect.width > 10 && rect.width < 80 && rect.height > 10 && rect.height < 80) {
+                            // Try clicking it
+                            icon.click();
+                            clicked = true;
+                            console.log('Clicked icon:', rect.width, 'x', rect.height);
+                            break;
+                        }
+                    }
+                    return clicked;
+                    """
+                    result = page.run_js(js_click_script)
+                    print(f"[{self.user_id}] 🎯 JavaScript click result: {result}")
+                    time.sleep(2)
+                    
+                    # Check if switched
+                    if "扫码登录" in page.html or "扫码" in page.html:
+                        switched = True
+                        print(f"[{self.user_id}] ✅ Successfully switched using JavaScript")
                 except Exception as e:
-                    print(f"[{self.user_id}] ⚠️ Strategy 1 failed: {e}")
+                    print(f"[{self.user_id}] ⚠️ JavaScript approach failed: {e}")
                 
-                # Strategy 2: Text anchor (fallback)
-                if not switch_btn:
-                    # Fallback 1: Text anchor strategy (most robust against class obfuscation)
-                    # Find "短信登录" (SMS Login) text, which is always present in SMS mode
-                    anchor = page.ele('text:短信登录', timeout=2)
-                    if not anchor:
-                        anchor = page.ele('text:手机号', timeout=2)
-                    
-                    if anchor:
-                        # Go up to the login box container (usually 2-4 levels up)
-                        # We look for a container that has an 'img' tag (the switch button)
-                        curr = anchor
-                        for _ in range(5):
-                            curr = curr.parent()
-                            if not curr: break
-                            # Look for img that is NOT a captcha or background
-                            imgs = curr.eles('tag:img')
-                            if imgs:
-                                # The switch button is usually the first or last image in the header
-                                # We pick the one that looks like a button (clickable)
-                                switch_btn = imgs[0] 
-                                break
-                    
-                if not switch_btn:
-                    # Fallback 2: Try the obfuscated class found in error_qr.html (css-jjnw1w or css-wemwzq)
-                    switch_btn = page.ele('.css-jjnw1w', timeout=1)
-                    if not switch_btn:
-                        switch_btn = page.ele('.css-wemwzq', timeout=1)
-
-                if not switch_btn:
-                     # Fallback 3: Any image in the top part of login box (if class exists)
-                     switch_btn = page.ele('xpath://div[contains(@class, "login-box")]//img', timeout=1)
-
-                if switch_btn:
-                    print(f"[{self.user_id}] 🖱️ Clicking switch button: {switch_btn}")
-                    
-                    # Try to switch and verify loop
-                    for i in range(3):
-                        # Try JS click first
-                        page.run_js("arguments[0].click()", switch_btn)
-                        time.sleep(2)
-                        
-                        # Verify the switch by checking for text change
-                        page_text = page.html
-                        if "扫码登录" in page_text:
-                            print(f"[{self.user_id}] ✅ Successfully switched to QR mode")
-                            break
-                        
-                        # If not switched, try standard click
-                        print(f"[{self.user_id}] ⚠️ Retry {i+1}: Click failed, trying standard click...")
-                        try:
-                            switch_btn.click()
-                        except:
-                            pass
-                        time.sleep(2)
-                        
-                        # Re-check
-                        if "扫码登录" in page.html:
-                            print(f"[{self.user_id}] ✅ Successfully switched to QR mode")
-                            break
-                    else:
-                        print(f"[{self.user_id}] ❌ Failed to switch to QR mode after retries")
-                        
+                # Approach 2: DrissionPage element-based approach (if JS failed)
+                if not switched:
+                    try:
+                        login_area = page.ele('css:div[class*="login"]', timeout=2)
+                        if login_area:
+                            icons = login_area.eles('tag:svg') + login_area.eles('tag:img')
+                            print(f"[{self.user_id}] 🔍 Found {len(icons)} icons in login area")
+                            for icon in icons:
+                                try:
+                                    rect = icon.rect
+                                    if 10 < rect.width < 80 and 10 < rect.height < 80:
+                                        print(f"[{self.user_id}] 🖱️ Clicking icon: {rect.width}x{rect.height}")
+                                        page.run_js("arguments[0].click()", icon)
+                                        time.sleep(2)
+                                        if "扫码登录" in page.html or "扫码" in page.html:
+                                            switched = True
+                                            print(f"[{self.user_id}] ✅ Successfully switched")
+                                            break
+                                except Exception as e:
+                                    print(f"[{self.user_id}] ⚠️ Failed to click icon: {e}")
+                                    continue
+                    except Exception as e:
+                        print(f"[{self.user_id}] ⚠️ DrissionPage approach failed: {e}")
+                
+                
+                # Log final status
+                if not switched:
+                    print(f"[{self.user_id}] ⚠️ Could not switch to QR mode - will try to capture anyway")
                 else:
-                    print(f"[{self.user_id}] ⚠️ Warning: Switch button not found")
+                    print(f"[{self.user_id}] ✅ Switch to QR mode completed")
 
             # Re-check for QR code after potential switch
             # Try multiple strategies for finding the QR code
