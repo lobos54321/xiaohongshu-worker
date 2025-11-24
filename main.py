@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 from typing import Dict, Optional
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Header
 from pydantic import BaseModel
@@ -23,8 +24,8 @@ WORKER_SECRET = os.getenv("WORKER_SECRET", "default_secret_key")
 MAX_CONCURRENT_BROWSERS = asyncio.Semaphore(2)
 
 # === Session Management ===
-# Store active login sessions: user_id -> BrowserManager instance
-login_sessions: Dict[str, BrowserManager] = {}
+# Store active login sessions: user_id -> {browser, qr_created_at}
+login_sessions: Dict[str, dict] = {}
 
 class PublishRequest(BaseModel):
     user_id: str
@@ -90,14 +91,17 @@ async def get_login_qrcode(
     # If there's an existing session for this user, close it first
     if request.user_id in login_sessions:
         try:
-            login_sessions[request.user_id].close()
+            login_sessions[request.user_id]["browser"].close()
         except:
             pass
         del login_sessions[request.user_id]
 
-    # Create new session
+    # Create new session with timestamp
     manager = BrowserManager(request.user_id)
-    login_sessions[request.user_id] = manager
+    login_sessions[request.user_id] = {
+        "browser": manager,
+        "qr_created_at": time.time()
+    }
     
     # Run synchronous browser op in thread pool
     loop = asyncio.get_running_loop()
@@ -123,34 +127,58 @@ async def check_login_status(
 ):
     """
     Check if the user has scanned the QR code and logged in
+    Also checks QR code expiration (90 seconds)
     """
     if authorization != f"Bearer {WORKER_SECRET}":
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     if user_id not in login_sessions:
-        raise HTTPException(status_code=404, detail="Session not found. Please request QR code first.")
-
-    manager = login_sessions[user_id]
+        return {"status": "not_found", "message": "No active session"}
     
+    session = login_sessions[user_id]
+    manager = session["browser"]
+    created_at = session["qr_created_at"]
+    
+    # Check QR expiration (90 seconds)
+    elapsed = time.time() - created_at
+    if elapsed > 90:
+        # QR code expired
+        return {
+            "status": "qr_expired",
+            "seconds_elapsed": int(elapsed),
+            "message": "二维码已过期，请重新获取"
+        }
+    
+    # Check if login succeeded
     loop = asyncio.get_running_loop()
-    is_logged_in = await loop.run_in_executor(None, manager.check_login_status)
+    is_logged_in = await loop.run_in_executor(
+        None,
+        manager.check_login_status
+    )
     
     if is_logged_in:
-        # Login successful! 
-        # In a real app, you might want to extract cookies here and return them
-        # For now, we just return success, and the cookies are persisted in the volume
+        # Get cookies after successful login
+        cookies = await loop.run_in_executor(
+            None,
+            manager.get_cookies
+        )
         
-        # Cleanup the browser session as it's no longer needed for interaction
-        # But wait! If we close it, we might lose the session if not fully persisted to disk yet?
-        # DrissionPage/Chrome usually persists to User Data Dir immediately.
-        # Let's keep it open for a moment or close it. 
-        # For safety, let's close it to free resources.
+        # Cleanup session after successful login
         manager.close()
         del login_sessions[user_id]
         
-        return {"status": "success", "message": "Login successful"}
-    else:
-        return {"status": "waiting", "message": "Waiting for scan"}
+        return {
+            "status": "success",
+            "message": "登录成功",
+            "cookies": cookies
+        }
+    
+    # Still waiting for scan
+    return {
+        "status": "waiting_scan",
+        "seconds_remaining": int(90 - elapsed),
+        "message": "等待扫码中"
+    }
 
 @app.get("/health")
 def health():

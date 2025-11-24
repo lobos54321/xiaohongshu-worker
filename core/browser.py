@@ -312,6 +312,20 @@ class BrowserManager:
             return False
         except:
             return False
+    
+    def get_cookies(self):
+        """
+        Export cookies after successful login
+        Returns list of cookie dicts or None
+        """
+        if not self.page:
+            return None
+        try:
+            cookies = self.page.cookies()
+            return cookies
+        except Exception as e:
+            print(f"[{self.user_id}] ⚠️ Failed to get cookies: {e}")
+            return None
 
     def close(self):
         """Clean up resources"""
