@@ -87,41 +87,71 @@ class BrowserManager:
             if not qr_img:
                 print(f"[{self.user_id}] 👀 SMS mode detected, switching to QR...")
                 # Try to find the switch button (usually top-right corner)
-                # Strategy: Look for the login box container first
-                login_box = page.ele('.css-1age63q', timeout=2)
-                switch_btn = None
-                
-                if login_box:
-                    # Look for the corner image inside the login box
-                    switch_btn = login_box.ele('tag:img', timeout=1)
+                # Strategy: Look for div with class containing 'switch' or specific structure
+                switch_btn = page.ele('css:div[class*="switch"]', timeout=2)
                 
                 if not switch_btn:
-                    # Fallback: Try the obfuscated class directly
-                    switch_btn = page.ele('.css-wemwzq', timeout=1)
+                    # Fallback 1: Text anchor strategy (most robust against class obfuscation)
+                    # Find "短信登录" (SMS Login) text, which is always present in SMS mode
+                    anchor = page.ele('text:短信登录', timeout=2)
+                    if not anchor:
+                        anchor = page.ele('text:手机号', timeout=2)
+                    
+                    if anchor:
+                        # Go up to the login box container (usually 2-4 levels up)
+                        # We look for a container that has an 'img' tag (the switch button)
+                        curr = anchor
+                        for _ in range(5):
+                            curr = curr.parent()
+                            if not curr: break
+                            # Look for img that is NOT a captcha or background
+                            imgs = curr.eles('tag:img')
+                            if imgs:
+                                # The switch button is usually the first or last image in the header
+                                # We pick the one that looks like a button (clickable)
+                                switch_btn = imgs[0] 
+                                break
+                    
+                if not switch_btn:
+                    # Fallback 2: Try the obfuscated class found in error_qr.html (css-jjnw1w or css-wemwzq)
+                    switch_btn = page.ele('.css-jjnw1w', timeout=1)
+                    if not switch_btn:
+                        switch_btn = page.ele('.css-wemwzq', timeout=1)
 
                 if not switch_btn:
-                    # Fallback: Old selector
-                    switch_btn = page.ele('css:div[class*="switch"]', timeout=1)
+                     # Fallback 3: Any image in the top part of login box (if class exists)
+                     switch_btn = page.ele('xpath://div[contains(@class, "login-box")]//img', timeout=1)
 
                 if switch_btn:
                     print(f"[{self.user_id}] 🖱️ Clicking switch button: {switch_btn}")
-                    # Try JS click for better reliability
-                    page.run_js("arguments[0].click()", switch_btn)
                     
-                    # Wait for page transition
-                    print(f"[{self.user_id}] ⏱️ Waiting for page transition...")
-                    time.sleep(5) # Wait longer for animation and render
-                    
-                    # Verify the switch by checking for text change
-                    page_text = page.html
-                    if "扫码登录" in page_text or "QR" in page_text.upper():
-                        print(f"[{self.user_id}] ✅ Successfully switched to QR mode")
-                    elif "短信登录" in page_text:
-                        print(f"[{self.user_id}] ⚠️ Warning: Still in SMS mode after click, trying to refresh")
-                        page.refresh()
-                        time.sleep(3)
+                    # Try to switch and verify loop
+                    for i in range(3):
+                        # Try JS click first
+                        page.run_js("arguments[0].click()", switch_btn)
+                        time.sleep(2)
+                        
+                        # Verify the switch by checking for text change
+                        page_text = page.html
+                        if "扫码登录" in page_text:
+                            print(f"[{self.user_id}] ✅ Successfully switched to QR mode")
+                            break
+                        
+                        # If not switched, try standard click
+                        print(f"[{self.user_id}] ⚠️ Retry {i+1}: Click failed, trying standard click...")
+                        try:
+                            switch_btn.click()
+                        except:
+                            pass
+                        time.sleep(2)
+                        
+                        # Re-check
+                        if "扫码登录" in page.html:
+                            print(f"[{self.user_id}] ✅ Successfully switched to QR mode")
+                            break
                     else:
-                        print(f"[{self.user_id}] ⚠️ Warning: Cannot determine login mode")
+                        print(f"[{self.user_id}] ❌ Failed to switch to QR mode after retries")
+                        
                 else:
                     print(f"[{self.user_id}] ⚠️ Warning: Switch button not found")
 
@@ -129,16 +159,37 @@ class BrowserManager:
             # Try multiple strategies for finding the QR code
             qr_box = None
             
+            def is_valid_qr(ele):
+                if not ele: return False
+                try:
+                    # Check size - QR code should be reasonably large (e.g. > 100px)
+                    rect = ele.rect
+                    return rect.width > 100 and rect.height > 100
+                except:
+                    return False
+
             # Strategy 1: Look for canvas element (most common for QR codes)
-            qr_box = page.ele('tag:canvas', timeout=3)
+            canvases = page.eles('tag:canvas')
+            for canvas in canvases:
+                if is_valid_qr(canvas):
+                    qr_box = canvas
+                    break
             
             if not qr_box:
                 # Strategy 2: Look for div containing "qrcode" or "qr" in class name
-                qr_box = page.ele('css:div[class*="qrcode"], css:div[class*="qr-"]', timeout=2)
+                divs = page.eles('css:div[class*="qrcode"], css:div[class*="qr-"]')
+                for div in divs:
+                    if is_valid_qr(div):
+                        qr_box = div
+                        break
             
             if not qr_box:
                 # Strategy 3: Look for img with qr in src or alt
-                qr_box = page.ele('css:img[alt*="qr"], css:img[src*="qrcode"], css:img[alt*="scan"]', timeout=2)
+                imgs = page.eles('css:img[alt*="qr"], css:img[src*="qrcode"], css:img[alt*="scan"]')
+                for img in imgs:
+                    if is_valid_qr(img):
+                        qr_box = img
+                        break
             
             if not qr_box:
                 # Strategy 4: By text content - find container with "扫码" nearby
@@ -146,7 +197,11 @@ class BrowserManager:
                 if qr_text:
                     # Try to find canvas or img near this text
                     parent = qr_text.parent()
-                    qr_box = parent.ele('tag:canvas', timeout=1) or parent.ele('tag:img', timeout=1)
+                    candidates = parent.eles('tag:canvas') + parent.eles('tag:img')
+                    for cand in candidates:
+                        if is_valid_qr(cand):
+                            qr_box = cand
+                            break
             
             print(f"[{self.user_id}] 🔍 QR element found: {qr_box}")
             
@@ -155,7 +210,28 @@ class BrowserManager:
                 base64_str = qr_box.get_screenshot(as_base64=True)
                 return {"status": "waiting_scan", "qr_image": base64_str}
             else:
-                raise Exception("QR code element not found")
+                print(f"[{self.user_id}] ⚠️ QR element not found, falling back to full screenshot")
+                # Fallback: Capture the login box or full page
+                # Try to find the login container again to at least crop to that
+                login_box = page.ele('css:div[class*="login-box"]', timeout=1)
+                if not login_box:
+                     # Try finding by text anchor "扫码登录" parent
+                     anchor = page.ele('text:扫码登录', timeout=1)
+                     if anchor:
+                         # Go up 3 levels to find container
+                         try:
+                            login_box = anchor.parent().parent().parent()
+                         except:
+                            pass
+                
+                if login_box:
+                    print(f"[{self.user_id}] 📸 Capturing login box as fallback")
+                    base64_str = login_box.get_screenshot(as_base64=True)
+                else:
+                    print(f"[{self.user_id}] 📸 Capturing full page as fallback")
+                    base64_str = page.get_screenshot(as_base64=True)
+                
+                return {"status": "waiting_scan", "qr_image": base64_str}
 
         except Exception as e:
             print(f"[{self.user_id}] ❌ Error getting QR: {str(e)}")
