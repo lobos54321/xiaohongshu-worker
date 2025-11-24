@@ -72,9 +72,15 @@ class BrowserManager:
         try:
             page = self.start_browser(proxy_url, user_agent)
             
+            
             print(f"[{self.user_id}] 🔍 Opening Creator Center login...")
-            page.get("https://creator.xiaohongshu.com/login")
-            page.wait.load_start()
+            try:
+                page.get("https://creator.xiaohongshu.com/login", timeout=15)
+                page.wait.load_start()
+            except Exception as load_err:
+                print(f"[{self.user_id}] ⚠️  Page load timeout/error: {str(load_err)}")
+                # Continue anyway - page might be partially loaded
+                time.sleep(3)
             
             # Check if we are already logged in
             if "creator/home" in page.url:
@@ -158,52 +164,67 @@ class BrowserManager:
             # Re-check for QR code after potential switch
             # Try multiple strategies for finding the QR code
             qr_box = None
+            print(f"[{self.user_id}] 🔍 Starting QR detection loop...")
             
             def is_valid_qr(ele):
                 if not ele: return False
                 try:
                     # Check size - QR code should be reasonably large (e.g. > 100px)
                     rect = ele.rect
+                    # print(f"[{self.user_id}] 📏 Checking element size: {rect.width}x{rect.height}")
                     return rect.width > 100 and rect.height > 100
-                except:
+                except Exception as e:
+                    print(f"[{self.user_id}] ⚠️ Error checking element size: {e}")
                     return False
 
             # Strategy 1: Look for canvas element (most common for QR codes)
+            print(f"[{self.user_id}] 🔍 Strategy 1: Checking canvas elements...")
             canvases = page.eles('tag:canvas')
+            print(f"[{self.user_id}] 🔍 Found {len(canvases)} canvases")
             for canvas in canvases:
                 if is_valid_qr(canvas):
                     qr_box = canvas
+                    print(f"[{self.user_id}] ✅ QR found in canvas")
                     break
             
             if not qr_box:
                 # Strategy 2: Look for div containing "qrcode" or "qr" in class name
+                print(f"[{self.user_id}] 🔍 Strategy 2: Checking div elements...")
                 divs = page.eles('css:div[class*="qrcode"], css:div[class*="qr-"]')
+                print(f"[{self.user_id}] 🔍 Found {len(divs)} divs")
                 for div in divs:
                     if is_valid_qr(div):
                         qr_box = div
+                        print(f"[{self.user_id}] ✅ QR found in div")
                         break
             
             if not qr_box:
                 # Strategy 3: Look for img with qr in src or alt
+                print(f"[{self.user_id}] 🔍 Strategy 3: Checking img elements...")
                 imgs = page.eles('css:img[alt*="qr"], css:img[src*="qrcode"], css:img[alt*="scan"]')
+                print(f"[{self.user_id}] 🔍 Found {len(imgs)} imgs")
                 for img in imgs:
                     if is_valid_qr(img):
                         qr_box = img
+                        print(f"[{self.user_id}] ✅ QR found in img")
                         break
             
             if not qr_box:
                 # Strategy 4: By text content - find container with "扫码" nearby
+                print(f"[{self.user_id}] 🔍 Strategy 4: Checking text context...")
                 qr_text = page.ele('xpath://div[contains(text(), "扫码")]', timeout=2)
                 if qr_text:
                     # Try to find canvas or img near this text
                     parent = qr_text.parent()
                     candidates = parent.eles('tag:canvas') + parent.eles('tag:img')
+                    print(f"[{self.user_id}] 🔍 Found {len(candidates)} candidates near text")
                     for cand in candidates:
                         if is_valid_qr(cand):
                             qr_box = cand
+                            print(f"[{self.user_id}] ✅ QR found near text")
                             break
             
-            print(f"[{self.user_id}] 🔍 QR element found: {qr_box}")
+            print(f"[{self.user_id}] 🔍 QR detection finished. Result: {qr_box}")
             
             if qr_box:
                 # Capture only the QR code area
@@ -235,6 +256,21 @@ class BrowserManager:
 
         except Exception as e:
             print(f"[{self.user_id}] ❌ Error getting QR: {str(e)}")
+            
+            # Emergency fallback: try to capture whatever is on screen
+            try:
+                if self.page:
+                    print(f"[{self.user_id}] 🚨 Emergency fallback: capturing current page state")
+                    base64_str = self.page.get_screenshot(as_base64=True)
+                    # Save for debugging
+                    with open(f"error_qr_{self.user_id}.png", "wb") as f:
+                        import base64
+                        f.write(base64.b64decode(base64_str))
+                    return {"status": "waiting_scan", "qr_image": base64_str, "note": "emergency_fallback"}
+            except Exception as fallback_error:
+                print(f"[{self.user_id}] ❌ Emergency fallback also failed: {str(fallback_error)}")
+            
+            # Original error handling for debugging
             try:
                 if page:
                     page.get_screenshot(path='.', name='error_qr.png')
