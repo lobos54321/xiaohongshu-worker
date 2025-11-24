@@ -12,19 +12,28 @@ class BrowserManager:
         # === Enterprise Design: User Data Isolation ===
         # Each user's data is stored in a separate directory
         # In Zeabur, /app/data needs to be a mounted Volume
-        self.user_data_dir = f"/app/data/users/{user_id}"
+        # Use relative path to support both Docker (/app/data) and local dev
+        self.user_data_dir = os.path.abspath(f"data/users/{user_id}")
         os.makedirs(self.user_data_dir, exist_ok=True)
         self.page = None
         self.display = None
 
     def _get_options(self, proxy_url: str = None, user_agent: str = None):
         co = ChromiumOptions()
-        # Linux Environment Configuration
-        co.set_browser_path('/usr/bin/chromium')
-        co.set_argument('--no-sandbox')
-        co.set_argument('--disable-gpu')
-        co.set_argument('--disable-dev-shm-usage')
         
+        # Auto-detect OS and set browser path
+        import platform
+        if platform.system() == 'Linux':
+            co.set_browser_path('/usr/bin/chromium')
+            co.set_argument('--no-sandbox')
+            co.set_argument('--disable-gpu')
+            co.set_argument('--disable-dev-shm-usage')
+            co.headless(True) # Must enable headless mode (with Xvfb on Linux)
+        else:
+            # On Mac/Windows, DrissionPage usually finds Chrome automatically. 
+            # Use native headless to avoid Xvfb dependency
+            co.set_argument('--headless=new')
+            
         # === 1. Security: Proxy Injection ===
         if proxy_url:
             co.set_proxy(proxy_url)
@@ -39,7 +48,6 @@ class BrowserManager:
         # Key: Point to user-specific directory
         co.set_user_data_path(self.user_data_dir)
         co.auto_port()  # Auto-assign debug port for concurrency
-        co.headless(True) # Must enable headless mode (with Xvfb)
         return co
 
     def start_browser(self, proxy_url: str = None, user_agent: str = None):
@@ -48,8 +56,10 @@ class BrowserManager:
             return self.page
 
         # Start virtual display (Linux required)
-        self.display = Display(visible=0, size=(1920, 1080))
-        self.display.start()
+        import platform
+        if platform.system() == 'Linux':
+            self.display = Display(visible=0, size=(1920, 1080))
+            self.display.start()
 
         co = self._get_options(proxy_url, user_agent)
         self.page = ChromiumPage(co)
@@ -77,23 +87,68 @@ class BrowserManager:
             if not qr_img:
                 print(f"[{self.user_id}] 👀 SMS mode detected, switching to QR...")
                 # Try to find the switch button (usually top-right corner)
-                # Strategy: Look for div with class containing 'switch' or specific structure
-                switch_btn = page.ele('css:div[class*="switch"]', timeout=3)
+                # Strategy: Look for the login box container first
+                login_box = page.ele('.css-1age63q', timeout=2)
+                switch_btn = None
+                
+                if login_box:
+                    # Look for the corner image inside the login box
+                    switch_btn = login_box.ele('tag:img', timeout=1)
                 
                 if not switch_btn:
-                    # Fallback: Try finding by SVG or specific position if class is obfuscated
-                    # This is a heuristic; might need adjustment if XHS changes UI
-                    switch_btn = page.ele('xpath://div[contains(@class, "login-box")]//div[contains(@class, "icon")]')
+                    # Fallback: Try the obfuscated class directly
+                    switch_btn = page.ele('.css-wemwzq', timeout=1)
+
+                if not switch_btn:
+                    # Fallback: Old selector
+                    switch_btn = page.ele('css:div[class*="switch"]', timeout=1)
 
                 if switch_btn:
-                    switch_btn.click()
-                    time.sleep(1) # Wait for animation
+                    print(f"[{self.user_id}] 🖱️ Clicking switch button: {switch_btn}")
+                    # Try JS click for better reliability
+                    page.run_js("arguments[0].click()", switch_btn)
+                    
+                    # Wait for page transition
+                    print(f"[{self.user_id}] ⏱️ Waiting for page transition...")
+                    time.sleep(5) # Wait longer for animation and render
+                    
+                    # Verify the switch by checking for text change
+                    page_text = page.html
+                    if "扫码登录" in page_text or "QR" in page_text.upper():
+                        print(f"[{self.user_id}] ✅ Successfully switched to QR mode")
+                    elif "短信登录" in page_text:
+                        print(f"[{self.user_id}] ⚠️ Warning: Still in SMS mode after click, trying to refresh")
+                        page.refresh()
+                        time.sleep(3)
+                    else:
+                        print(f"[{self.user_id}] ⚠️ Warning: Cannot determine login mode")
                 else:
                     print(f"[{self.user_id}] ⚠️ Warning: Switch button not found")
 
-            # Wait for QR code to render
-            print(f"[{self.user_id}] ⏳ Waiting for QR render...")
-            qr_box = page.wait.ele('css:div[class*="qrcode"]', timeout=10)
+            # Re-check for QR code after potential switch
+            # Try multiple strategies for finding the QR code
+            qr_box = None
+            
+            # Strategy 1: Look for canvas element (most common for QR codes)
+            qr_box = page.ele('tag:canvas', timeout=3)
+            
+            if not qr_box:
+                # Strategy 2: Look for div containing "qrcode" or "qr" in class name
+                qr_box = page.ele('css:div[class*="qrcode"], css:div[class*="qr-"]', timeout=2)
+            
+            if not qr_box:
+                # Strategy 3: Look for img with qr in src or alt
+                qr_box = page.ele('css:img[alt*="qr"], css:img[src*="qrcode"], css:img[alt*="scan"]', timeout=2)
+            
+            if not qr_box:
+                # Strategy 4: By text content - find container with "扫码" nearby
+                qr_text = page.ele('xpath://div[contains(text(), "扫码")]', timeout=2)
+                if qr_text:
+                    # Try to find canvas or img near this text
+                    parent = qr_text.parent()
+                    qr_box = parent.ele('tag:canvas', timeout=1) or parent.ele('tag:img', timeout=1)
+            
+            print(f"[{self.user_id}] 🔍 QR element found: {qr_box}")
             
             if qr_box:
                 # Capture only the QR code area
@@ -104,6 +159,13 @@ class BrowserManager:
 
         except Exception as e:
             print(f"[{self.user_id}] ❌ Error getting QR: {str(e)}")
+            try:
+                if page:
+                    page.get_screenshot(path='.', name='error_qr.png')
+                    with open('error_qr.html', 'w', encoding='utf-8') as f:
+                        f.write(page.html)
+            except:
+                pass
             return {"status": "error", "msg": str(e)}
 
     def check_login_status(self):
