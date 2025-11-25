@@ -109,7 +109,7 @@ async def get_login_qrcode(
     
     login_sessions[request.user_id] = {
         "browser": manager,
-        "qr_created_at": time.time()
+        "qr_created_at": time.time() # Initial timestamp (will be updated after generation)
     }
     
     # Run synchronous browser op in thread pool
@@ -126,6 +126,11 @@ async def get_login_qrcode(
         await browser_pool.release(request.user_id, keep_alive=False)
         del login_sessions[request.user_id]
         raise HTTPException(status_code=500, detail=result.get("msg"))
+    
+    # Update timestamp AFTER successful generation to give user full 90s
+    # This accounts for the browser startup time (cold start ~60s)
+    if request.user_id in login_sessions:
+        login_sessions[request.user_id]["qr_created_at"] = time.time()
         
     return result
 

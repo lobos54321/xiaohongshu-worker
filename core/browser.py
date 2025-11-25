@@ -54,16 +54,18 @@ class BrowserManager:
 
     def start_browser(self, proxy_url: str = None, user_agent: str = None):
         """Initialize browser session"""
-        # Clean up any existing browser first to prevent conflicts
+        # Try to reuse existing page if it's alive
         if self.page:
-            print(f"[{self.user_id}] 🧹 Cleaning up existing browser before starting new one")
             try:
-                self.page.quit()
-            except:
-                pass
-            self.page = None
+                # Simple liveness check
+                if self.page.url:
+                    print(f"[{self.user_id}] ♻️ Reusing existing browser page")
+                    return self.page
+            except Exception as e:
+                print(f"[{self.user_id}] ⚠️ Existing browser dead, restarting: {e}")
+                self.page = None
 
-        # Clean up user data directory before starting a new session
+        # Clean up user data directory before starting a new session (only if cold start)
         # This ensures a fresh state for each login attempt or session
         if os.path.exists(self.user_data_dir):
             print(f"[{self.user_id}] 🗑️ Cleaning up user data directory: {self.user_data_dir}")
