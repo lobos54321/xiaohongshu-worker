@@ -155,28 +155,50 @@ class BrowserManager:
             if not qr_img:
                 print(f"[{self.user_id}] 👀 SMS mode detected, switching to QR...")
                 
+                # Debug: Capture screenshot before switch attempt
+                try:
+                    debug_path = f"debug_before_switch_{self.user_id}.png"
+                    page.get_screenshot(path=debug_path)
+                    print(f"[{self.user_id}] 📸 Captured debug screenshot: {debug_path}")
+                except:
+                    pass
+
                 # Aggressive strategy: Try multiple approaches to click the switch button
                 switched = False
                 
-                # Approach 1: Use JavaScript to find and click ALL small SVG/IMG elements
+                # Approach 1: Use JavaScript to find and click specific icon classes
+                # The QR switch button often has classes like 'icon-btn-wrapper' or is an SVG inside a div
                 try:
                     js_click_script = """
                     (async function() {
+                        // Target specific known classes first
+                        const specificTargets = document.querySelectorAll('.icon-btn-wrapper, .login-icon');
+                        for (let t of specificTargets) {
+                            t.click();
+                            console.log('Clicked specific target:', t);
+                            await new Promise(r => setTimeout(r, 200));
+                        }
+                        
+                        // Fallback: Click all small SVGs/IMGs in the top-left area (where the QR icon usually is)
                         const allIcons = [...document.querySelectorAll('svg'), ...document.querySelectorAll('img')];
                         let clickedCount = 0;
                         
                         for (let icon of allIcons) {
                             const rect = icon.getBoundingClientRect();
-                            // Look for small icons (10-80px) - click ALL of them
+                            // Look for small icons (10-80px)
                             if (rect.width > 10 && rect.width < 80 && rect.height > 10 && rect.height < 80) {
-                                try {
-                                    icon.click();
-                                    clickedCount++;
-                                    console.log('Clicked icon:', rect.width, 'x', rect.height);
-                                    // Small delay between clicks
-                                    await new Promise(r => setTimeout(r, 200));
-                                } catch(e) {
-                                    console.log('Failed to click:', e);
+                                // Priority: Top-left corner (x < 200, y < 200) relative to login box or page
+                                if (rect.x < 300 && rect.y < 300) {
+                                    try {
+                                        icon.click();
+                                        // Also try clicking parent
+                                        if (icon.parentElement) icon.parentElement.click();
+                                        clickedCount++;
+                                        console.log('Clicked icon at:', rect.x, rect.y);
+                                        await new Promise(r => setTimeout(r, 200));
+                                    } catch(e) {
+                                        console.log('Failed to click:', e);
+                                    }
                                 }
                             }
                         }
