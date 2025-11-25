@@ -34,7 +34,9 @@ login_sessions: Dict[str, dict] = {}
 class PublishRequest(BaseModel):
     user_id: str
     cookies: str
-    video_url: str
+    publish_type: str = "video" # "video" or "image"
+    video_url: Optional[str] = None # Backward compatibility
+    files: Optional[list[str]] = [] # List of URLs (video or images)
     title: str
     desc: str
     proxy_url: Optional[str] = None
@@ -48,21 +50,49 @@ class LoginRequest(BaseModel):
 async def background_publisher(data: PublishRequest):
     """Background task executor"""
     async with MAX_CONCURRENT_BROWSERS:
-        print(f"🚦 Task processing started: User {data.user_id}")
+        print(f"🚦 Task processing started: User {data.user_id} | Type: {data.publish_type}")
         browser = BrowserManager(data.user_id)
         
-        loop = asyncio.get_running_loop()
-        success, msg = await loop.run_in_executor(
-            None, 
-            browser.execute_publish,
-            data.cookies,
-            data.video_url,
-            data.title,
-            data.desc,
-            data.proxy_url,
-            data.user_agent
-        )
-        print(f"🏁 Task finished: User {data.user_id} | Result: {msg}")
+        # Prepare file list
+        urls_to_download = []
+        if data.files:
+            urls_to_download = data.files
+        elif data.video_url:
+            urls_to_download = [data.video_url]
+            
+        # Download all files
+        from core.utils import download_file
+        local_files = []
+        try:
+            for url in urls_to_download:
+                suffix = ".mp4" if data.publish_type == "video" else ".jpg"
+                # Simple heuristic for extension
+                if ".png" in url.lower(): suffix = ".png"
+                if ".jpg" in url.lower() or ".jpeg" in url.lower(): suffix = ".jpg"
+                
+                path = download_file(url, suffix=suffix)
+                local_files.append(path)
+                
+            loop = asyncio.get_running_loop()
+            success, msg = await loop.run_in_executor(
+                None, 
+                browser.publish_content,
+                data.cookies,
+                data.publish_type,
+                local_files,
+                data.title,
+                data.desc,
+                data.proxy_url,
+                data.user_agent
+            )
+            print(f"🏁 Task finished: User {data.user_id} | Result: {msg}")
+        except Exception as e:
+            print(f"❌ Task failed: {e}")
+            # Cleanup if failed before browser cleanup
+            for f in local_files:
+                if os.path.exists(f):
+                    try: os.remove(f)
+                    except: pass
 
 @app.post("/api/v1/publish")
 async def trigger_publish(
@@ -78,6 +108,7 @@ async def trigger_publish(
     return {
         "status": "queued",
         "user_id": request.user_id,
+        "type": request.publish_type,
         "message": "Task accepted and queued."
     }
 

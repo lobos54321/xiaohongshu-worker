@@ -435,45 +435,71 @@ class BrowserManager:
             except Exception as e:
                 print(f"[{self.user_id}] ⚠️ Failed to clean user data directory: {e}")
 
-    def execute_publish(self, cookies: str, video_url: str, title: str, desc: str, proxy_url: str = None, user_agent: str = None):
-        local_video_path = None
-        
+    def publish_content(self, cookies: str, publish_type: str, files: list, title: str, desc: str, proxy_url: str = None, user_agent: str = None):
+        """
+        Publish content (Video or Image) to Xiaohongshu
+        publish_type: 'video' or 'image'
+        files: list of local file paths
+        """
         try:
-            print(f"[{self.user_id}] 🚀 Starting publish task...")
+            print(f"[{self.user_id}] 🚀 Starting publish task ({publish_type})...")
             
-            # 1. Download video
-            local_video_path = download_video(video_url)
-
-            # 2. Start browser (if not already started)
+            # 1. Start browser (if not already started)
             page = self.start_browser(proxy_url, user_agent)
             
-            # 3. Inject/Update Cookie
+            # 2. Inject/Update Cookie
             page.get("https://creator.xiaohongshu.com")
             
             if cookies:
-                # If cookies are provided as string, inject them
-                # Note: If we just logged in via QR, cookies are already in the browser session
                 page.set.cookies(cookies)
                 page.refresh()
                 time.sleep(3)
 
-            # 4. Check login status
+            # 3. Check login status
             if "login" in page.url:
                 raise Exception("Cookie expired or not logged in")
 
             print(f"[{self.user_id}] 🔐 Login verified, entering publish page...")
             page.get('https://creator.xiaohongshu.com/publish/publish')
             
-            # 5. Upload video
+            # 4. Handle Tab Switching (Video vs Image)
+            # Default is usually Video. If Image, need to switch tab.
+            # Tab selectors: .tab-item
+            if publish_type == 'image':
+                print(f"[{self.user_id}] 🖼️ Switching to Image/Text tab...")
+                try:
+                    # Try to find the tab by text "图文"
+                    image_tab = page.ele('text:图文', timeout=5)
+                    if image_tab:
+                        image_tab.click()
+                        time.sleep(1)
+                    else:
+                        print(f"[{self.user_id}] ⚠️ Could not find Image tab by text, trying index...")
+                        # Fallback: usually the second tab
+                        tabs = page.eles('.tab-item')
+                        if len(tabs) >= 2:
+                            tabs[1].click()
+                            time.sleep(1)
+                except Exception as e:
+                    print(f"[{self.user_id}] ⚠️ Error switching tab: {e}")
+
+            # 5. Upload Files
             upload_input = page.ele('tag:input@type=file', timeout=10)
             if not upload_input:
                 raise Exception("Upload input not found")
                 
-            upload_input.input(local_video_path)
-            print(f"[{self.user_id}] 📤 Uploading video...")
+            print(f"[{self.user_id}] 📤 Uploading {len(files)} files...")
+            # DrissionPage supports uploading multiple files by passing a list
+            upload_input.input(files)
             
             # Wait for upload completion
-            page.wait.ele('text:重新上传', timeout=120)
+            # For images, it might be faster. For video, wait for "Re-upload" text.
+            if publish_type == 'video':
+                page.wait.ele('text:重新上传', timeout=120)
+            else:
+                # For images, wait a bit for previews to appear
+                time.sleep(5)
+                
             print(f"[{self.user_id}] ✅ Upload complete")
 
             # 6. Fill content
@@ -502,5 +528,10 @@ class BrowserManager:
             
         finally:
             self.close()
-            if local_video_path and os.path.exists(local_video_path):
-                os.remove(local_video_path)
+            # Cleanup temp files
+            for f in files:
+                if os.path.exists(f):
+                    try:
+                        os.remove(f)
+                    except:
+                        pass

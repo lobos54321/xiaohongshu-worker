@@ -2,19 +2,19 @@ import os
 import requests
 import uuid
 
-def download_video(url: str, temp_dir: str = "/tmp") -> str:
+def download_file(url: str, temp_dir: str = "/tmp", suffix: str = ".mp4") -> str:
     """
-    Download video to temporary directory and return local path
+    Download file to temporary directory and return local path
     """
     try:
         if not os.path.exists(temp_dir):
             os.makedirs(temp_dir)
             
-        # Generate random filename to avoid conflicts
-        file_name = f"{uuid.uuid4()}.mp4"
+        # Generate random filename
+        file_name = f"{uuid.uuid4()}{suffix}"
         file_path = os.path.join(temp_dir, file_name)
         
-        print(f"📥 Downloading video: {url}")
+        print(f"📥 Downloading file: {url}")
         with requests.get(url, stream=True, timeout=60) as r:
             r.raise_for_status()
             with open(file_path, 'wb') as f:
@@ -24,4 +24,8 @@ def download_video(url: str, temp_dir: str = "/tmp") -> str:
         print(f"✅ Download complete: {file_path}")
         return file_path
     except Exception as e:
-        raise Exception(f"Video download failed: {str(e)}")
+        raise Exception(f"File download failed: {str(e)}")
+
+def download_video(url: str, temp_dir: str = "/tmp") -> str:
+    """Wrapper for backward compatibility"""
+    return download_file(url, temp_dir, suffix=".mp4")
