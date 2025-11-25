@@ -414,11 +414,26 @@ class BrowserManager:
     def close(self):
         """Clean up resources"""
         if self.page:
-            self.page.quit()
+            try:
+                self.page.quit()
+            except:
+                pass
             self.page = None
         if self.display:
-            self.display.stop()
+            try:
+                self.display.stop()
+            except:
+                pass
             self.display = None
+
+    def cleanup_user_data(self):
+        """Delete the user data directory to ensure no cookies/data persist"""
+        if os.path.exists(self.user_data_dir):
+            print(f"[{self.user_id}] 🗑️ Final cleanup of user data directory: {self.user_data_dir}")
+            try:
+                shutil.rmtree(self.user_data_dir)
+            except Exception as e:
+                print(f"[{self.user_id}] ⚠️ Failed to clean user data directory: {e}")
 
     def execute_publish(self, cookies: str, video_url: str, title: str, desc: str, proxy_url: str = None, user_agent: str = None):
         local_video_path = None

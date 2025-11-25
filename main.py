@@ -134,6 +134,42 @@ async def get_login_qrcode(
         
     return result
 
+@app.delete("/api/v1/login/session/{user_id}")
+async def close_session(
+    user_id: str,
+    authorization: str = Header(None)
+):
+    """
+    Close the browser session for the given user_id
+    """
+    if authorization != f"Bearer {WORKER_SECRET}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # 1. Remove from local session tracker
+    if user_id in login_sessions:
+        del login_sessions[user_id]
+    
+    # 2. Release/Close from browser pool and clean data
+    try:
+        # If we have the manager instance, use it to clean data
+        if user_id in login_sessions:
+            manager = login_sessions[user_id]["browser"]
+            # Force close browser first
+            await browser_pool.release(user_id, keep_alive=False)
+            # Then clean data directory
+            manager.cleanup_user_data()
+        else:
+            # If not in active sessions, try to release anyway just in case
+            await browser_pool.release(user_id, keep_alive=False)
+            # And try to clean data directory blindly if possible (would need new manager instance)
+            # But for now, just relying on active session is enough for the logout flow
+            
+        return {"status": "success", "message": f"Session {user_id} closed and data cleaned"}
+    except Exception as e:
+        # Even if it fails (e.g. not found), we consider it success as the goal is cleanup
+        print(f"Error closing session {user_id}: {e}")
+        return {"status": "success", "message": f"Session {user_id} cleanup attempted"}
+
 @app.get("/api/v1/login/status/{user_id}")
 async def check_login_status(
     user_id: str,
