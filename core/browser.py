@@ -99,15 +99,43 @@ class BrowserManager:
         """
         try:
             page = self.start_browser(proxy_url, user_agent)
-            # Open login page with extended timeout
-            print(f"[{self.user_id}] 🌐 Navigating to login page...")
-            try:
-                page.get('https://creator.xiaohongshu.com/login', timeout=60)  # Increased from 15s to 60s
-                print(f"[{self.user_id}] ✅ Page loaded successfully")
-            except Exception as timeout_err:
-                print(f"[{self.user_id}] ⏱️ Page load timeout after 60s: {timeout_err}")
-                # Continue anyway - page might be partially loaded
-                time.sleep(3)
+            
+            # Smart Refresh Logic: Check if we're already on the login page
+            current_url = page.url
+            is_login_page = "creator.xiaohongshu.com/login" in current_url
+            
+            if is_login_page:
+                print(f"[{self.user_id}] ♻️ Already on login page, attempting smart refresh...")
+                try:
+                    # 1. Try to find and click the "refresh QR" button/mask if it exists
+                    # The class usually contains 'refresh' or it's an overlay
+                    refresh_btn = page.ele('text:点击刷新', timeout=2)
+                    if refresh_btn:
+                        print(f"[{self.user_id}] 🎯 Found refresh button, clicking...")
+                        refresh_btn.click()
+                        time.sleep(2) # Wait for refresh
+                    else:
+                        # 2. If no button, just reload the page (faster than full nav)
+                        print(f"[{self.user_id}] 🔄 No refresh button, reloading page...")
+                        page.refresh()
+                        # Wait briefly for reload
+                        try:
+                            page.wait.load_start(timeout=5)
+                        except:
+                            pass
+                except Exception as e:
+                    print(f"[{self.user_id}] ⚠️ Smart refresh failed, falling back to full navigation: {e}")
+                    page.get('https://creator.xiaohongshu.com/login', timeout=60)
+            else:
+                # Full navigation for cold start or wrong page
+                print(f"[{self.user_id}] 🌐 Navigating to login page...")
+                try:
+                    page.get('https://creator.xiaohongshu.com/login', timeout=60)
+                    print(f"[{self.user_id}] ✅ Page loaded successfully")
+                except Exception as timeout_err:
+                    print(f"[{self.user_id}] ⏱️ Page load timeout after 60s: {timeout_err}")
+                    # Continue anyway - page might be partially loaded
+                    time.sleep(3)
             
             # Check if we are already logged in
             if "creator/home" in page.url:
