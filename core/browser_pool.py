@@ -66,9 +66,27 @@ class BrowserPool:
                 self.in_use[user_id] = manager
                 return manager
             
-            # Pool is full - wait or raise error
-            print(f"[{user_id}] ⚠️  Browser pool full ({self.max_size} browsers in use)")
-            raise Exception(f"Browser pool exhausted. Max {self.max_size} concurrent sessions.")
+            # Pool is full - Evict oldest session (LRU/FIFO)
+            print(f"[{user_id}] ⚠️  Browser pool full ({self.max_size} browsers). Evicting oldest session...")
+            
+            # Get the first (oldest) user_id from in_use dict
+            # Python 3.7+ dicts preserve insertion order, so first item is oldest
+            oldest_user_id = next(iter(self.in_use))
+            oldest_manager = self.in_use[oldest_user_id]
+            
+            print(f"[{user_id}] 🚫 Evicting session: {oldest_user_id}")
+            try:
+                oldest_manager.close()
+            except Exception as e:
+                print(f"[{oldest_user_id}] ⚠️ Error closing evicted browser: {e}")
+            
+            del self.in_use[oldest_user_id]
+            
+            # Now create new browser for current user
+            print(f"[{user_id}] 🆕 Creating new browser instance after eviction")
+            manager = BrowserManager(user_id)
+            self.in_use[user_id] = manager
+            return manager
     
     async def release(self, user_id: str, keep_alive: bool = True):
         """
