@@ -155,7 +155,30 @@ class BrowserManager:
                     except:
                         print(f"[{self.user_id}] ⚠️ Switch clicked but QR did not appear")
                 else:
-                    print(f"[{self.user_id}] ⚠️ Could not find switch button")
+                    print(f"[{self.user_id}] ⚠️ Could not find switch button by selector, trying coordinate fallback...")
+                    # Fallback: Click top-left of login box
+                    try:
+                        # Find login box by text "登录" or common class
+                        login_box = page.ele('css:div[class*="login-box"]', timeout=1) or \
+                                    page.ele('css:div[class*="login-container"]', timeout=1) or \
+                                    page.ele('text:登录', index=0).parent().parent()
+                        
+                        if login_box:
+                            rect = login_box.rect
+                            # rect might be an object or tuple depending on version
+                            x = rect.location[0] if hasattr(rect, 'location') else (rect[0] if isinstance(rect, tuple) else rect.x)
+                            y = rect.location[1] if hasattr(rect, 'location') else (rect[1] if isinstance(rect, tuple) else rect.y)
+                            
+                            # Click 30px from top-left
+                            click_x = x + 30
+                            click_y = y + 30
+                            print(f"[{self.user_id}] 🖱️ Clicking coordinates ({click_x}, {click_y})...")
+                            page.run_js(f'document.elementFromPoint({click_x}, {click_y}).click()')
+                            
+                            page.wait.ele('tag:canvas', timeout=3)
+                            print(f"[{self.user_id}] ✅ Coordinate switch successful")
+                    except Exception as e:
+                        print(f"[{self.user_id}] ❌ Coordinate fallback failed: {e}")
 
             # 4. QR Detection (Proceed to existing detection logic)
             print(f"[{self.user_id}] 🔍 Starting QR detection loop...")
