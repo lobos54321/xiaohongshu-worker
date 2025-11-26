@@ -142,49 +142,54 @@ class BrowserManager:
                 # Try to find the switch button using multiple strategies
                 switched = False
                 
-                # Strategy 1: Known classes
-                try:
-                    btn = page.ele('.icon-btn-wrapper', timeout=0.5) or \
-                          page.ele('.login-icon', timeout=0.5)
-                    if btn:
-                        print(f"[{self.user_id}] 🖱️ Strategy 1: Clicking switch button by class...")
-                        btn.click()
-                        switched = True
-                except:
-                    pass
-                    
-                # Strategy 2: First SVG in login box
+                # Strategy 4: Geometric Search relative to "短信登录" text
                 if not switched:
                     try:
-                        login_box = page.ele('css:div[class*="login-box"]', timeout=0.5) or \
-                                    page.ele('css:div[class*="login-container"]', timeout=0.5) or \
-                                    page.ele('text:登录', index=0).parent().parent()
-                        
-                        if login_box:
-                            # Try clicking the first SVG inside
-                            svg = login_box.ele('tag:svg', timeout=0.5)
-                            if svg:
-                                print(f"[{self.user_id}] 🖱️ Strategy 2: Clicking first SVG in login box...")
-                                svg.click()
-                                switched = True
+                        print(f"[{self.user_id}] 🔍 Strategy 4: Geometric search via '短信登录' text...")
+                        # Find the "SMS Login" text
+                        sms_text = page.ele('text:短信登录', timeout=1)
+                        if sms_text:
+                            # Go up to find the container (white box)
+                            # Usually it's a few levels up. We look for a div with reasonable size.
+                            container = sms_text.parent()
+                            for _ in range(5):
+                                if not container: break
+                                rect = container.rect
+                                w = rect.size[0] if hasattr(rect, 'size') else rect.width
+                                h = rect.size[1] if hasattr(rect, 'size') else rect.height
+                                # Login box is usually around 300-500px wide
+                                if 200 < w < 600 and 200 < h < 600:
+                                    break
+                                container = container.parent()
                             
-                            # Strategy 3: JS Click Top-Left Corner (Most Reliable for Corner Icons)
-                            if not switched:
-                                print(f"[{self.user_id}] 🖱️ Strategy 3: JS Click Top-Left of Login Box...")
-                                js_code = """
-                                    var box = arguments[0];
-                                    var rect = box.getBoundingClientRect();
-                                    // Click 20px from top-left
-                                    var x = rect.left + 20;
-                                    var y = rect.top + 20;
-                                    var el = document.elementFromPoint(x, y);
-                                    if (el) el.click();
-                                    return [x, y];
-                                """
-                                page.run_js(js_code, login_box)
-                                switched = True
+                            if container:
+                                print(f"[{self.user_id}] 📦 Found container via text: {container}")
+                                # Find all SVGs in this container
+                                svgs = container.eles('tag:svg')
+                                for svg in svgs:
+                                    # Check if SVG is in top-left corner
+                                    # We need relative position. 
+                                    # DrissionPage rect is absolute screen coordinates.
+                                    s_rect = svg.rect
+                                    c_rect = container.rect
+                                    
+                                    sx = s_rect.location[0] if hasattr(s_rect, 'location') else (s_rect[0] if isinstance(s_rect, tuple) else s_rect.x)
+                                    sy = s_rect.location[1] if hasattr(s_rect, 'location') else (s_rect[1] if isinstance(s_rect, tuple) else s_rect.y)
+                                    
+                                    cx = c_rect.location[0] if hasattr(c_rect, 'location') else (c_rect[0] if isinstance(c_rect, tuple) else c_rect.x)
+                                    cy = c_rect.location[1] if hasattr(c_rect, 'location') else (c_rect[1] if isinstance(c_rect, tuple) else c_rect.y)
+                                    
+                                    rel_x = sx - cx
+                                    rel_y = sy - cy
+                                    
+                                    # If in top-left 60x60 area
+                                    if 0 <= rel_x < 60 and 0 <= rel_y < 60:
+                                        print(f"[{self.user_id}] 🎯 Found corner SVG at ({rel_x}, {rel_y}), clicking...")
+                                        svg.click()
+                                        switched = True
+                                        break
                     except Exception as e:
-                        print(f"[{self.user_id}] ⚠️ Switch strategies failed: {e}")
+                        print(f"[{self.user_id}] ⚠️ Geometric strategy failed: {e}")
 
                 # Wait for QR to appear
                 try:
