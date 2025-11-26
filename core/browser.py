@@ -199,10 +199,12 @@ class BrowserManager:
                                 # Strategy 5: JS Click Top-Right Corner (Fallback)
                                 if not switched and container:
                                     print(f"[{self.user_id}] 🖱️ Strategy 5: JS Click Top-Right of Login Box...")
+                                    # Click 20px from edges to target the QR mode switch icon in top-right corner
+                                    # Typical UI pattern has the icon at approximately (right-20px, top+20px)
                                     js_code = """
                                         var box = arguments[0];
                                         var rect = box.getBoundingClientRect();
-                                        // Click 20px from top-right
+                                        // Click 20px from top-right to target the switch icon
                                         var x = rect.right - 20;
                                         var y = rect.top + 20;
                                         var el = document.elementFromPoint(x, y);
@@ -213,7 +215,8 @@ class BrowserManager:
                                         return [x, y, false];
                                     """
                                     result = page.run_js(js_code, container)
-                                    if result and len(result) >= 3 and result[2]:
+                                    # Validate result structure before accessing elements
+                                    if result and isinstance(result, list) and len(result) >= 3 and result[2]:
                                         print(f"[{self.user_id}] ✅ JS click executed at ({result[0]}, {result[1]})")
                                         switched = True
                                     else:
