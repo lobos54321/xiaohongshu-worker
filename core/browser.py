@@ -137,48 +137,61 @@ class BrowserManager:
             qr_present = page.ele('tag:canvas', timeout=1) or page.ele('.qrcode-img', timeout=1)
             
             if not qr_present:
-                print(f"[{self.user_id}] 👀 QR not found, attempting to switch mode...")
+                print(f"[{self.user_id}] 👀 SMS mode detected (QR not found), attempting to switch...")
                 
-                # Try clicking the switch button (usually top-left corner icon)
-                # Use a broad selector for the switch icon
-                switch_btn = page.ele('.icon-btn-wrapper', timeout=1) or \
-                             page.ele('.login-icon', timeout=1) or \
-                             page.ele('css:div[class*="login"] svg', index=0, timeout=1)
-                             
-                if switch_btn:
-                    print(f"[{self.user_id}] 🖱️ Clicking switch button...")
-                    switch_btn.click()
-                    # Wait for QR to appear instead of fixed sleep
+                # Try to find the switch button using multiple strategies
+                switched = False
+                
+                # Strategy 1: Known classes
+                try:
+                    btn = page.ele('.icon-btn-wrapper', timeout=0.5) or \
+                          page.ele('.login-icon', timeout=0.5)
+                    if btn:
+                        print(f"[{self.user_id}] 🖱️ Strategy 1: Clicking switch button by class...")
+                        btn.click()
+                        switched = True
+                except:
+                    pass
+                    
+                # Strategy 2: First SVG in login box
+                if not switched:
                     try:
-                        page.wait.ele('tag:canvas', timeout=3)
-                        print(f"[{self.user_id}] ✅ Switch successful (QR appeared)")
-                    except:
-                        print(f"[{self.user_id}] ⚠️ Switch clicked but QR did not appear")
-                else:
-                    print(f"[{self.user_id}] ⚠️ Could not find switch button by selector, trying coordinate fallback...")
-                    # Fallback: Click top-left of login box
-                    try:
-                        # Find login box by text "登录" or common class
-                        login_box = page.ele('css:div[class*="login-box"]', timeout=1) or \
-                                    page.ele('css:div[class*="login-container"]', timeout=1) or \
+                        login_box = page.ele('css:div[class*="login-box"]', timeout=0.5) or \
+                                    page.ele('css:div[class*="login-container"]', timeout=0.5) or \
                                     page.ele('text:登录', index=0).parent().parent()
                         
                         if login_box:
-                            rect = login_box.rect
-                            # rect might be an object or tuple depending on version
-                            x = rect.location[0] if hasattr(rect, 'location') else (rect[0] if isinstance(rect, tuple) else rect.x)
-                            y = rect.location[1] if hasattr(rect, 'location') else (rect[1] if isinstance(rect, tuple) else rect.y)
+                            # Try clicking the first SVG inside
+                            svg = login_box.ele('tag:svg', timeout=0.5)
+                            if svg:
+                                print(f"[{self.user_id}] 🖱️ Strategy 2: Clicking first SVG in login box...")
+                                svg.click()
+                                switched = True
                             
-                            # Click 30px from top-left
-                            click_x = x + 30
-                            click_y = y + 30
-                            print(f"[{self.user_id}] 🖱️ Clicking coordinates ({click_x}, {click_y})...")
-                            page.run_js(f'document.elementFromPoint({click_x}, {click_y}).click()')
-                            
-                            page.wait.ele('tag:canvas', timeout=3)
-                            print(f"[{self.user_id}] ✅ Coordinate switch successful")
+                            # Strategy 3: JS Click Top-Left Corner (Most Reliable for Corner Icons)
+                            if not switched:
+                                print(f"[{self.user_id}] 🖱️ Strategy 3: JS Click Top-Left of Login Box...")
+                                js_code = """
+                                    var box = arguments[0];
+                                    var rect = box.getBoundingClientRect();
+                                    // Click 20px from top-left
+                                    var x = rect.left + 20;
+                                    var y = rect.top + 20;
+                                    var el = document.elementFromPoint(x, y);
+                                    if (el) el.click();
+                                    return [x, y];
+                                """
+                                page.run_js(js_code, login_box)
+                                switched = True
                     except Exception as e:
-                        print(f"[{self.user_id}] ❌ Coordinate fallback failed: {e}")
+                        print(f"[{self.user_id}] ⚠️ Switch strategies failed: {e}")
+
+                # Wait for QR to appear
+                try:
+                    page.wait.ele('tag:canvas', timeout=3)
+                    print(f"[{self.user_id}] ✅ Switch successful (QR appeared)")
+                except:
+                    print(f"[{self.user_id}] ⚠️ Switch action performed but QR did not appear")
 
             # 4. QR Detection (Proceed to existing detection logic)
             print(f"[{self.user_id}] 🔍 Starting QR detection loop...")
