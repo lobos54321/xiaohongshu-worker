@@ -167,9 +167,8 @@ class BrowserManager:
                                 # Find all SVGs in this container
                                 svgs = container.eles('tag:svg')
                                 for svg in svgs:
-                                    # Check if SVG is in top-left corner
+                                    # Check if SVG is in top-right corner
                                     # We need relative position. 
-                                    # DrissionPage rect is absolute screen coordinates.
                                     s_rect = svg.rect
                                     c_rect = container.rect
                                     
@@ -182,14 +181,33 @@ class BrowserManager:
                                     rel_x = sx - cx
                                     rel_y = sy - cy
                                     
-                                    # If in top-left 60x60 area
-                                    if 0 <= rel_x < 60 and 0 <= rel_y < 60:
-                                        print(f"[{self.user_id}] 🎯 Found corner SVG at ({rel_x}, {rel_y}), clicking...")
+                                    # Container width
+                                    cw = c_rect.size[0] if hasattr(c_rect, 'size') else c_rect.width
+                                    
+                                    # If in top-right 60x60 area (x > width - 60, y < 60)
+                                    if (cw - 60) < rel_x < cw and 0 <= rel_y < 60:
+                                        print(f"[{self.user_id}] 🎯 Found top-right corner SVG at ({rel_x}, {rel_y}), clicking...")
                                         svg.click()
                                         switched = True
                                         break
+                                        
+                            # Strategy 5: JS Click Top-Right Corner (Fallback)
+                            if not switched:
+                                print(f"[{self.user_id}] 🖱️ Strategy 5: JS Click Top-Right of Login Box...")
+                                js_code = """
+                                    var box = arguments[0];
+                                    var rect = box.getBoundingClientRect();
+                                    // Click 20px from top-right
+                                    var x = rect.right - 20;
+                                    var y = rect.top + 20;
+                                    var el = document.elementFromPoint(x, y);
+                                    if (el) el.click();
+                                    return [x, y];
+                                """
+                                page.run_js(js_code, container)
+                                switched = True
                     except Exception as e:
-                        print(f"[{self.user_id}] ⚠️ Geometric strategy failed: {e}")
+                        print(f"[{self.user_id}] ⚠️ Geometric/JS strategy failed: {e}")
 
                 # Wait for QR to appear
                 try:
