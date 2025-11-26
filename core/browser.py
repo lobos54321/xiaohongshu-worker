@@ -97,164 +97,67 @@ class BrowserManager:
         """
         Open login page, switch to QR mode, and return Base64 image
         """
+    def get_login_qrcode(self, proxy_url: str = None, user_agent: str = None):
+        """
+        Start browser and return QR code image (base64)
+        Optimized for speed: checks for QR immediately
+        """
         try:
             start_time = time.time()
             page = self.start_browser(proxy_url, user_agent)
             print(f"[{self.user_id}] ⏱️ Browser start/reuse took {time.time() - start_time:.2f}s")
             
-            # Smart Refresh Logic: Check if we're already on the login page
-            current_url = page.url
-            is_login_page = "creator.xiaohongshu.com/login" in current_url
-            
-            if is_login_page:
-                print(f"[{self.user_id}] ♻️ Already on login page, attempting smart refresh...")
-                refresh_start = time.time()
-                try:
-                    # 1. Try to find and click the "refresh QR" button/mask if it exists
-                    # The class usually contains 'refresh' or it's an overlay
-                    refresh_btn = page.ele('text:点击刷新', timeout=2)
-                    if refresh_btn:
-                        print(f"[{self.user_id}] 🎯 Found refresh button, clicking...")
-                        refresh_btn.click()
-                        time.sleep(1) # Wait for refresh
-                    else:
-                        # 2. If no button, just reload the page using JS (faster than driver refresh)
-                        print(f"[{self.user_id}] 🔄 No refresh button, reloading page via JS...")
-                        page.run_js('location.reload()')
-                        # Wait briefly for reload to start
-                        time.sleep(2)
-                        try:
-                            # Wait for load start but with short timeout
-                            page.wait.load_start(timeout=5)
-                        except:
-                            pass
-                    print(f"[{self.user_id}] ⏱️ Smart refresh took {time.time() - refresh_start:.2f}s")
-                except Exception as e:
-                    print(f"[{self.user_id}] ⚠️ Smart refresh failed, falling back to full navigation: {e}")
-                    page.get('https://creator.xiaohongshu.com/login', timeout=60)
+            # 1. Quick Check: Are we already on login page with a QR code?
+            if "creator.xiaohongshu.com/login" in page.url:
+                print(f"[{self.user_id}] ⚡ Already on login page, checking for QR immediately...")
+                # Fast check for canvas or img
+                if page.ele('tag:canvas', timeout=0.5) or page.ele('.qrcode-img', timeout=0.5):
+                    print(f"[{self.user_id}] ✅ QR code already present, skipping navigation/refresh")
+                    # Jump straight to detection
+                    pass 
+                else:
+                    # Not found immediately, try reload
+                    print(f"[{self.user_id}] 🔄 QR not found, reloading page...")
+                    page.run_js('location.reload()')
+                    page.wait.load_start()
             else:
-                # Full navigation for cold start or wrong page
+                # Full navigation
                 print(f"[{self.user_id}] 🌐 Navigating to login page...")
-                nav_start = time.time()
-                try:
-                    page.get('https://creator.xiaohongshu.com/login', timeout=60)
-                    print(f"[{self.user_id}] ✅ Page loaded successfully in {time.time() - nav_start:.2f}s")
-                except Exception as timeout_err:
-                    print(f"[{self.user_id}] ⏱️ Page load timeout after 60s: {timeout_err}")
-                    # Continue anyway - page might be partially loaded
-                    time.sleep(3)
-            
-            # Check if we are already logged in
+                page.get('https://creator.xiaohongshu.com/login', timeout=30)
+
+            # 2. Check if already logged in
             if "creator/home" in page.url:
                 return {"status": "logged_in", "msg": "Already logged in"}
 
-            # === Switch to QR Code Mode ===
-            # Look for the QR code image first
-            qr_img = page.ele('.qrcode-img', timeout=2)
+            # 3. Switch to QR Code Mode (if needed)
+            # Wait briefly for page to settle
+            page.wait.doc_loaded(timeout=5)
             
-            if not qr_img:
-                print(f"[{self.user_id}] 👀 SMS mode detected, switching to QR...")
+            # Check if we need to switch (look for SMS input or missing QR)
+            qr_present = page.ele('tag:canvas', timeout=1) or page.ele('.qrcode-img', timeout=1)
+            
+            if not qr_present:
+                print(f"[{self.user_id}] 👀 QR not found, attempting to switch mode...")
                 
-                # Debug: Capture screenshot before switch attempt
-                try:
-                    debug_path = f"debug_before_switch_{self.user_id}.png"
-                    page.get_screenshot(path=debug_path)
-                    print(f"[{self.user_id}] 📸 Captured debug screenshot: {debug_path}")
-                except:
-                    pass
-
-                # Aggressive strategy: Try multiple approaches to click the switch button
-                switched = False
-                
-                # Approach 1: Use JavaScript to find and click specific icon classes
-                # The QR switch button often has classes like 'icon-btn-wrapper' or is an SVG inside a div
-                try:
-                    js_click_script = """
-                    (async function() {
-                        // Target specific known classes first
-                        const specificTargets = document.querySelectorAll('.icon-btn-wrapper, .login-icon');
-                        for (let t of specificTargets) {
-                            t.click();
-                            console.log('Clicked specific target:', t);
-                            await new Promise(r => setTimeout(r, 200));
-                        }
-                        
-                        // Fallback: Click all small SVGs/IMGs in the top-left area (where the QR icon usually is)
-                        const allIcons = [...document.querySelectorAll('svg'), ...document.querySelectorAll('img')];
-                        let clickedCount = 0;
-                        
-                        for (let icon of allIcons) {
-                            const rect = icon.getBoundingClientRect();
-                            // Look for small icons (10-80px)
-                            if (rect.width > 10 && rect.width < 80 && rect.height > 10 && rect.height < 80) {
-                                // Priority: Top-left corner (x < 200, y < 200) relative to login box or page
-                                if (rect.x < 300 && rect.y < 300) {
-                                    try {
-                                        icon.click();
-                                        // Also try clicking parent
-                                        if (icon.parentElement) icon.parentElement.click();
-                                        clickedCount++;
-                                        console.log('Clicked icon at:', rect.x, rect.y);
-                                        await new Promise(r => setTimeout(r, 200));
-                                    } catch(e) {
-                                        console.log('Failed to click:', e);
-                                    }
-                                }
-                            }
-                        }
-                        return clickedCount;
-                    })();
-                    """
-                    result = page.run_js(js_click_script)
-                    print(f"[{self.user_id}] 🎯 Clicked {result} icons with JavaScript")
-                    time.sleep(3)
-                    
-                    # Check if switched
-                    if "扫码登录" in page.html or "扫码" in page.html:
-                        switched = True
-                        print(f"[{self.user_id}] ✅ Successfully switched using JavaScript")
-                except Exception as e:
-                    print(f"[{self.user_id}] ⚠️ JavaScript approach failed: {e}")
-                
-                # Approach 2: DrissionPage element-based approach (if JS failed)
-                if not switched:
+                # Try clicking the switch button (usually top-left corner icon)
+                # Use a broad selector for the switch icon
+                switch_btn = page.ele('.icon-btn-wrapper', timeout=1) or \
+                             page.ele('.login-icon', timeout=1) or \
+                             page.ele('css:div[class*="login"] svg', index=0, timeout=1)
+                             
+                if switch_btn:
+                    print(f"[{self.user_id}] 🖱️ Clicking switch button...")
+                    switch_btn.click()
+                    # Wait for QR to appear instead of fixed sleep
                     try:
-                        login_area = page.ele('css:div[class*="login"]', timeout=2)
-                        if login_area:
-                            icons = login_area.eles('tag:svg') + login_area.eles('tag:img')
-                            print(f"[{self.user_id}] 🔍 Found {len(icons)} icons in login area")
-                            for icon in icons:
-                                try:
-                                    # Get bounding box - use size property instead of rect
-                                    rect = icon.rect
-                                    # rect has properties: width, height, x, y - but access them as tuple indices
-                                    w = rect.size[0] if hasattr(rect, 'size') else rect.width
-                                    h = rect.size[1] if hasattr(rect, 'size') else rect.height
-                                    
-                                    if 10 < w < 80 and 10 < h < 80:
-                                        print(f"[{self.user_id}] 🖱️ Clicking icon: {w}x{h}")
-                                        page.run_js("arguments[0].click()", icon)
-                                        time.sleep(2)
-                                        if "扫码登录" in page.html or "扫码" in page.html:
-                                            switched = True
-                                            print(f"[{self.user_id}] ✅ Successfully switched")
-                                            break
-                                except Exception as e:
-                                    print(f"[{self.user_id}] ⚠️ Failed to check/click icon: {e}")
-                                    continue
-                    except Exception as e:
-                        print(f"[{self.user_id}] ⚠️ DrissionPage approach failed: {e}")
-                
-                
-                # Log final status
-                if not switched:
-                    print(f"[{self.user_id}] ⚠️ Could not switch to QR mode - will try to capture anyway")
+                        page.wait.ele('tag:canvas', timeout=3)
+                        print(f"[{self.user_id}] ✅ Switch successful (QR appeared)")
+                    except:
+                        print(f"[{self.user_id}] ⚠️ Switch clicked but QR did not appear")
                 else:
-                    print(f"[{self.user_id}] ✅ Switch to QR mode completed")
+                    print(f"[{self.user_id}] ⚠️ Could not find switch button")
 
-            # Re-check for QR code after potential switch
-            # Try multiple strategies for finding the QR code
-            qr_box = None
+            # 4. QR Detection (Proceed to existing detection logic)
             print(f"[{self.user_id}] 🔍 Starting QR detection loop...")
             
             def is_valid_qr(ele):
@@ -385,13 +288,26 @@ class BrowserManager:
             return False
             
         try:
-            # Check URL
+            # 1. Check URL (Fastest)
             if "creator/home" in self.page.url:
                 return True
             
-            # Check for specific element
+            # 2. Check for specific element (Fast)
             if self.page.ele('text:发布笔记', timeout=1):
                 return True
+
+            # 3. Check Cookies (Reliable)
+            # If we have 'web_session', we are likely logged in
+            cookies = self.page.cookies(as_dict=True)
+            if 'web_session' in cookies:
+                print(f"[{self.user_id}] 🍪 Found web_session cookie, forcing navigation to home...")
+                try:
+                    self.page.get("https://creator.xiaohongshu.com/creator/home", timeout=10)
+                    # Double check after navigation
+                    if "creator/home" in self.page.url:
+                        return True
+                except:
+                    pass
                 
             return False
         except:
