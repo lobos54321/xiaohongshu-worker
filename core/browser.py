@@ -141,6 +141,7 @@ class BrowserManager:
                 
                 # Try to find the switch button using multiple strategies
                 switched = False
+                qr_found = False # Initialize to prevent UnboundLocalError
                 
                 # Strategy 4: Geometric Search relative to "短信登录" text
                 if not switched:
@@ -154,12 +155,16 @@ class BrowserManager:
                             container = sms_text.parent()
                             for _ in range(5):
                                 if not container: break
-                                rect = container.rect
-                                w = rect.size[0] if hasattr(rect, 'size') else rect.width
-                                h = rect.size[1] if hasattr(rect, 'size') else rect.height
-                                # Login box is usually around 300-500px wide
-                                if 200 < w < 600 and 200 < h < 600:
-                                    break
+                                try:
+                                    rect = container.rect
+                                    if not rect: continue
+                                    w = rect.size[0] if hasattr(rect, 'size') else rect.width
+                                    h = rect.size[1] if hasattr(rect, 'size') else rect.height
+                                    # Login box is usually around 300-500px wide
+                                    if 200 < w < 600 and 200 < h < 600:
+                                        break
+                                except:
+                                    pass
                                 container = container.parent()
                             
                             if container:
