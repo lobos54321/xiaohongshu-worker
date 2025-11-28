@@ -143,188 +143,104 @@ class BrowserManager:
                 switched = False
                 qr_found = False # Initialize to prevent UnboundLocalError
                 
-                # Strategy 4: Geometric Search relative to "短信登录" text
+                # Strategy: Smart Switch (Consolidated)
                 if not switched:
                     try:
-                        print(f"[{self.user_id}] 🔍 Strategy 4: Geometric search via '短信登录' text...")
-                        # Find the "SMS Login" text
-                        sms_text = page.ele('text:短信登录', timeout=1)
-                        if sms_text:
-                            # Go up to find the container (white box)
-                            # Usually it's a few levels up. We look for a div with reasonable size.
-                            container = sms_text.parent()
-                            for _ in range(5):
-                                if not container: break
-                                try:
-                                    rect = container.rect
-                                    if not rect: continue
-                                    w = rect.size[0] if hasattr(rect, 'size') else rect.width
-                                    h = rect.size[1] if hasattr(rect, 'size') else rect.height
-                                    # Login box is usually around 300-500px wide
-                                    if 200 < w < 600 and 200 < h < 600:
-                                        break
-                                except:
-                                    pass
-                                container = container.parent()
-                            
-                            if container:
-                                print(f"[{self.user_id}] 📦 Found container via text: {container}")
-                                # Find all SVGs in this container
-                                svgs = container.eles('tag:svg')
-                                for svg in svgs:
-                                    # Check if SVG is in top-right corner
-                                    # We need relative position. 
-                                    s_rect = svg.rect
-                                    c_rect = container.rect
-                                    
-                                    sx = s_rect.location[0] if hasattr(s_rect, 'location') else (s_rect[0] if isinstance(s_rect, tuple) else s_rect.x)
-                                    sy = s_rect.location[1] if hasattr(s_rect, 'location') else (s_rect[1] if isinstance(s_rect, tuple) else s_rect.y)
-                                    
-                                    cx = c_rect.location[0] if hasattr(c_rect, 'location') else (c_rect[0] if isinstance(c_rect, tuple) else c_rect.x)
-                                    cy = c_rect.location[1] if hasattr(c_rect, 'location') else (c_rect[1] if isinstance(c_rect, tuple) else c_rect.y)
-                                    
-                                    rel_x = sx - cx
-                                    rel_y = sy - cy
-                                    
-                                    # Container width
-                                    cw = c_rect.size[0] if hasattr(c_rect, 'size') else c_rect.width
-                                    
-                                    # If in top-right 60x60 area (x > width - 60, y < 60)
-                                    if (cw - 60) < rel_x < cw and 0 <= rel_y < 60:
-                                        print(f"[{self.user_id}] 🎯 Found top-right corner SVG at ({rel_x}, {rel_y}), clicking...")
-                                        svg.click()
-                                        switched = True
-                                        break
-                                        
-                            # Strategy 5: JS Click Top-Right Corner (Fallback)
-                            if not qr_found:
-                                print(f"[{self.user_id}] 🖱️ Strategy 5: JS Click Top-Right of Login Box...")
-                                js_code = """
-                                    var box = arguments[0];
-                                    var rect = box.getBoundingClientRect();
-                                    // Click 20px from top-right
-                                    var x = rect.right - 20;
-                                    var y = rect.top + 20;
-                                    var el = document.elementFromPoint(x, y);
-                                    if (el) el.click();
-                                    return [x, y];
-                                """
-                                page.run_js(js_code, container)
-                                if page.wait.ele('tag:canvas', timeout=2) or page.wait.ele('tag:img[src*="base64"]', timeout=2):
-                                    print(f"[{self.user_id}] ✅ Switch successful (Strategy 5)")
-                                    qr_found = True
-
-                    except Exception as e:
-                        print(f"[{self.user_id}] ⚠️ Geometric/JS strategy failed: {e}")
-                
-                # Strategy 6: Real Mouse Event Simulation
-                if not qr_found:
-                    try:
-                        print(f"[{self.user_id}] 🖱️ Strategy 6: Simulating Real Mouse Events (JS)...")
-                        # Find login container again if needed
-                        sms_text = page.ele('text:短信登录', timeout=1)
-                        if sms_text:
-                            container = sms_text.parent()
-                            for _ in range(5):
-                                if not container: break
-                                try:
-                                    rect = container.rect
-                                    # Check if rect is valid
-                                    if not rect: continue
-                                    w = rect.size[0] if hasattr(rect, 'size') else rect.width
-                                    h = rect.size[1] if hasattr(rect, 'size') else rect.height
-                                    if 200 < w < 600 and 200 < h < 600:
-                                        break
-                                except:
-                                    pass
-                                container = container.parent()
-                            
-                            if container:
-                                rect = container.rect
-                                cx = rect.location[0] if hasattr(rect, 'location') else (rect[0] if isinstance(rect, tuple) else rect.x)
-                                cy = rect.location[1] if hasattr(rect, 'location') else (rect[1] if isinstance(rect, tuple) else rect.y)
-                                cw = rect.size[0] if hasattr(rect, 'size') else rect.width
-                                
-                                target_x = cx + cw - 20
-                                target_y = cy + 20
-                                
-                                js_mouse_event = f"""
-                                    var el = document.elementFromPoint({target_x}, {target_y});
-                                    if (el) {{
-                                        ['mouseenter', 'mouseover', 'mousemove', 'mousedown', 'mouseup', 'click'].forEach(function(eventType) {{
-                                            var event = new MouseEvent(eventType, {{
-                                                bubbles: true,
-                                                cancelable: true,
-                                                view: window,
-                                                clientX: {target_x},
-                                                clientY: {target_y}
-                                            }});
-                                            el.dispatchEvent(event);
-                                        }});
-                                        return true;
-                                    }}
-                                    return false;
-                                """
-                                page.run_js(js_mouse_event)
-                                if page.wait.ele('tag:canvas', timeout=2) or page.wait.ele('tag:img[src*="base64"]', timeout=2):
-                                    print(f"[{self.user_id}] ✅ Switch successful (Strategy 6)")
-                                    qr_found = True
-                    except Exception as e:
-                        print(f"[{self.user_id}] ⚠️ Real Mouse Event strategy failed: {e}")
-
-                # Strategy 7: DrissionPage Actions API
-                if not qr_found:
-                    try:
-                        print(f"[{self.user_id}] 🖱️ Strategy 7: DrissionPage Actions API...")
+                        print(f"[{self.user_id}] 🖱️ Strategy: Smart Switch (Traversing containers)...")
                         from DrissionPage.common import Actions
                         
-                        # Find login box with robust traversal
-                        sms_text = page.ele('text:短信登录', timeout=1)
-                        container = None
+                        # Find "SMS Login" text as anchor
+                        sms_text = page.ele('text:短信登录', timeout=2)
+                        
                         if sms_text:
                             curr = sms_text.parent()
-                            for _ in range(10): # Traverse up to 10 levels
+                            # Traverse up to find the best container
+                            for i in range(10): 
                                 if not curr: break
                                 try:
                                     rect = curr.rect
-                                    if rect and rect.size[0] > 200 and rect.size[1] > 200:
-                                        container = curr
-                                        print(f"[{self.user_id}] 📦 Found valid container: {curr.tag} ({rect.size})")
-                                        break
-                                except:
-                                    pass
+                                    if not rect: 
+                                        curr = curr.parent()
+                                        continue
+                                        
+                                    w = rect.size[0] if hasattr(rect, 'size') else rect.width
+                                    h = rect.size[1] if hasattr(rect, 'size') else rect.height
+                                    
+                                    # Check if this looks like a login box (at least 250x250)
+                                    if w > 250 and h > 250:
+                                        print(f"[{self.user_id}] 📦 Checking container level {i}: {curr.tag} ({w}x{h})")
+                                        
+                                        # 1. Try to find an SVG switch button in corners
+                                        svgs = curr.eles('tag:svg')
+                                        target_btn = None
+                                        
+                                        for svg in svgs:
+                                            s_rect = svg.rect
+                                            if not s_rect: continue
+                                            
+                                            # Relative position
+                                            sx = s_rect.location[0] if hasattr(s_rect, 'location') else (s_rect[0] if isinstance(s_rect, tuple) else s_rect.x)
+                                            sy = s_rect.location[1] if hasattr(s_rect, 'location') else (s_rect[1] if isinstance(s_rect, tuple) else s_rect.y)
+                                            
+                                            cx = rect.location[0] if hasattr(rect, 'location') else (rect[0] if isinstance(rect, tuple) else rect.x)
+                                            cy = rect.location[1] if hasattr(rect, 'location') else (rect[1] if isinstance(rect, tuple) else rect.y)
+                                            
+                                            rel_x = sx - cx
+                                            rel_y = sy - cy
+                                            
+                                            # Check Top-Left (common for "Back" or "Switch")
+                                            if 0 <= rel_x < 80 and 0 <= rel_y < 80:
+                                                print(f"[{self.user_id}] 🎯 Found Top-Left SVG")
+                                                target_btn = svg
+                                                break
+                                            
+                                            # Check Top-Right (common for "QR/PC Switch")
+                                            if (w - 80) < rel_x < w and 0 <= rel_y < 80:
+                                                print(f"[{self.user_id}] 🎯 Found Top-Right SVG")
+                                                target_btn = svg
+                                                break
+                                        
+                                        # Action: Click Button or Coordinate
+                                        if target_btn:
+                                            print(f"[{self.user_id}] 🖱️ Clicking found SVG button...")
+                                            target_btn.click()
+                                        else:
+                                            print(f"[{self.user_id}] 🖱️ No SVG found, clicking Top-Right coordinate...")
+                                            # Click 25px from top-right
+                                            cx = rect.location[0] if hasattr(rect, 'location') else (rect[0] if isinstance(rect, tuple) else rect.x)
+                                            cy = rect.location[1] if hasattr(rect, 'location') else (rect[1] if isinstance(rect, tuple) else rect.y)
+                                            target_x = cx + w - 25
+                                            target_y = cy + 25
+                                            
+                                            ac = Actions(page)
+                                            ac.move_to((target_x, target_y)).click()
+                                        
+                                        # Wait for QR to appear
+                                        print(f"[{self.user_id}] ⏳ Waiting for QR code...")
+                                        for _ in range(6): # Wait 3 seconds
+                                            if page.ele('tag:canvas', timeout=0.1) or page.ele('tag:img[src*="base64"]', timeout=0.1):
+                                                print(f"[{self.user_id}] ✅ Switch successful!")
+                                                qr_found = True
+                                                switched = True
+                                                break
+                                            time.sleep(0.5)
+                                        
+                                        if qr_found: break
+                                        
+                                except Exception as e:
+                                    print(f"[{self.user_id}] ⚠️ Error checking container: {e}")
+                                
                                 curr = curr.parent()
                                 
-                        if container:
-                            rect = container.rect
-                            cx = rect.location[0] if hasattr(rect, 'location') else (rect[0] if isinstance(rect, tuple) else rect.x)
-                            cy = rect.location[1] if hasattr(rect, 'location') else (rect[1] if isinstance(rect, tuple) else rect.y)
-                            cw = rect.size[0] if hasattr(rect, 'size') else rect.width
-                            
-                            # Target: Top-Right corner
-                            target_x = cx + cw - 25
-                            target_y = cy + 25
-                            
-                            ac = Actions(page)
-                            ac.move_to((target_x, target_y)).click()
-                            
-                            # Wait for QR to appear with polling
-                            print(f"[{self.user_id}] ⏳ Waiting for QR code to appear (Strategy 7)...")
-                            for _ in range(10): # Wait up to 5 seconds
-                                if page.ele('tag:canvas') or page.ele('tag:img[src*="base64"]'):
-                                    print(f"[{self.user_id}] ✅ Switch successful (Strategy 7)")
-                                    qr_found = True
-                                    break
-                                time.sleep(0.5)
-                                
                     except Exception as e:
-                        print(f"[{self.user_id}] ⚠️ Actions API strategy failed: {e}")
+                        print(f"[{self.user_id}] ⚠️ Smart Switch strategy failed: {e}")
 
                 if not qr_found:
-                     print(f"[{self.user_id}] ⚠️ All switch strategies failed or QR did not appear")
-                     # Dump container HTML for debugging
-                     if container:
-                         print(f"[{self.user_id}] 🐛 Container HTML Dump: {container.html[:500]}...")
+                     print(f"[{self.user_id}] ⚠️ Switch failed. Dumping page structure...")
+                     try:
+                         # Dump simplified structure
+                         print(f"[{self.user_id}] Page Title: {page.title}")
+                     except: pass
 
             # 4. QR Detection (Proceed to existing detection logic)
             print(f"[{self.user_id}] 🔍 Starting QR detection loop...")
