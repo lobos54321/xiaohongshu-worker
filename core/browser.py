@@ -176,9 +176,7 @@ class BrowserManager:
                                         
                                         for svg in svgs:
                                             try:
-                                                # Skip invisible or tiny SVGs
-                                                if not svg.states.is_visible: continue
-                                                
+                                                # Skip tiny SVGs
                                                 s_rect = svg.rect
                                                 if not s_rect: continue
                                                 
@@ -255,9 +253,6 @@ class BrowserManager:
             def is_valid_qr(ele):
                 if not ele: return False
                 try:
-                    # Check visibility first
-                    if not ele.states.is_visible: return False
-                    
                     # Check size - QR code should be reasonably large
                     # Relaxed check to > 50px to avoid false negatives
                     rect = ele.rect
