@@ -208,6 +208,90 @@ class BrowserManager:
                                 switched = True
                     except Exception as e:
                         print(f"[{self.user_id}] ⚠️ Geometric/JS strategy failed: {e}")
+                
+                # Strategy 6: Real Mouse Event Simulation (New)
+                if not switched:
+                    try:
+                        print(f"[{self.user_id}] 🖱️ Strategy 6: Simulating Real Mouse Events (JS)...")
+                        # Find login container again if needed
+                        sms_text = page.ele('text:短信登录', timeout=1)
+                        if sms_text:
+                            container = sms_text.parent()
+                            for _ in range(5):
+                                if not container: break
+                                rect = container.rect
+                                w = rect.size[0] if hasattr(rect, 'size') else rect.width
+                                h = rect.size[1] if hasattr(rect, 'size') else rect.height
+                                if 200 < w < 600 and 200 < h < 600:
+                                    break
+                                container = container.parent()
+                            
+                            if container:
+                                rect = container.rect
+                                # Target: Top-Right corner (right - 20, top + 20)
+                                cx = rect.location[0] if hasattr(rect, 'location') else (rect[0] if isinstance(rect, tuple) else rect.x)
+                                cy = rect.location[1] if hasattr(rect, 'location') else (rect[1] if isinstance(rect, tuple) else rect.y)
+                                cw = rect.size[0] if hasattr(rect, 'size') else rect.width
+                                
+                                target_x = cx + cw - 20
+                                target_y = cy + 20
+                                
+                                js_mouse_event = f"""
+                                    var el = document.elementFromPoint({target_x}, {target_y});
+                                    if (el) {{
+                                        ['mouseenter', 'mouseover', 'mousemove', 'mousedown', 'mouseup', 'click'].forEach(function(eventType) {{
+                                            var event = new MouseEvent(eventType, {{
+                                                bubbles: true,
+                                                cancelable: true,
+                                                view: window,
+                                                clientX: {target_x},
+                                                clientY: {target_y}
+                                            }});
+                                            el.dispatchEvent(event);
+                                        }});
+                                        return true;
+                                    }}
+                                    return false;
+                                """
+                                page.run_js(js_mouse_event)
+                                switched = True
+                    except Exception as e:
+                        print(f"[{self.user_id}] ⚠️ Real Mouse Event strategy failed: {e}")
+
+                # Strategy 7: DrissionPage Actions API (New)
+                if not switched:
+                    try:
+                        print(f"[{self.user_id}] 🖱️ Strategy 7: DrissionPage Actions API...")
+                        from DrissionPage.common import Actions
+                        
+                        # Find login box
+                        sms_text = page.ele('text:短信登录', timeout=1)
+                        if sms_text:
+                            container = sms_text.parent()
+                            for _ in range(5):
+                                if not container: break
+                                rect = container.rect
+                                w = rect.size[0] if hasattr(rect, 'size') else rect.width
+                                h = rect.size[1] if hasattr(rect, 'size') else rect.height
+                                if 200 < w < 600 and 200 < h < 600:
+                                    break
+                                container = container.parent()
+                                
+                            if container:
+                                rect = container.rect
+                                cx = rect.location[0] if hasattr(rect, 'location') else (rect[0] if isinstance(rect, tuple) else rect.x)
+                                cy = rect.location[1] if hasattr(rect, 'location') else (rect[1] if isinstance(rect, tuple) else rect.y)
+                                cw = rect.size[0] if hasattr(rect, 'size') else rect.width
+                                
+                                # Target: Top-Right corner
+                                target_x = cx + cw - 25
+                                target_y = cy + 25
+                                
+                                ac = Actions(page)
+                                ac.move_to((target_x, target_y)).click().perform()
+                                switched = True
+                    except Exception as e:
+                        print(f"[{self.user_id}] ⚠️ Actions API strategy failed: {e}")
 
                 # Wait for QR to appear
                 try:
@@ -236,18 +320,28 @@ class BrowserManager:
                     print(f"[{self.user_id}] ⚠️ Error checking element size: {e}")
                     return False
 
-            # Strategy 1: Look for canvas element (most common for QR codes)
-            print(f"[{self.user_id}] 🔍 Strategy 1: Checking canvas elements...")
-            canvases = page.eles('tag:canvas')
-            print(f"[{self.user_id}] 🔍 Found {len(canvases)} canvases")
-            for canvas in canvases:
-                if is_valid_qr(canvas):
-                    qr_box = canvas
-                    print(f"[{self.user_id}] ✅ QR found in canvas")
+            # Strategy 1: Look for img element with base64 src (Found in analysis)
+            print(f"[{self.user_id}] 🔍 Strategy 1: Checking img elements with base64 src...")
+            imgs = page.eles('tag:img')
+            for img in imgs:
+                src = img.attr('src')
+                if src and 'data:image/png;base64' in src and is_valid_qr(img):
+                    qr_box = img
+                    print(f"[{self.user_id}] ✅ QR found in img tag (base64)")
                     break
             
             if not qr_box:
-                # Strategy 2: Look for div containing "qrcode" or "qr" in class name
+                # Strategy 2: Look for canvas element
+                print(f"[{self.user_id}] 🔍 Strategy 2: Checking canvas elements...")
+                canvases = page.eles('tag:canvas')
+                for canvas in canvases:
+                    if is_valid_qr(canvas):
+                        qr_box = canvas
+                        print(f"[{self.user_id}] ✅ QR found in canvas")
+                        break
+            
+            if not qr_box:
+                # Strategy 3: Look for div containing "qrcode" or "qr" in class name
                 print(f"[{self.user_id}] 🔍 Strategy 2: Checking div elements...")
                 divs = page.eles('css:div[class*="qrcode"], css:div[class*="qr-"]')
                 print(f"[{self.user_id}] 🔍 Found {len(divs)} divs")
