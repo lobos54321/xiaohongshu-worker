@@ -302,63 +302,18 @@ class BrowserManager:
                             
                             ac = Actions(page)
                             ac.move_to((target_x, target_y)).click()
-                            if page.wait.ele('tag:canvas', timeout=2) or page.wait.ele('tag:img[src*="base64"]', timeout=2):
-                                print(f"[{self.user_id}] ✅ Switch successful (Strategy 7)")
-                                qr_found = True
+                            
+                            # Wait for QR to appear with polling
+                            print(f"[{self.user_id}] ⏳ Waiting for QR code to appear (Strategy 7)...")
+                            for _ in range(10): # Wait up to 5 seconds
+                                if page.ele('tag:canvas') or page.ele('tag:img[src*="base64"]'):
+                                    print(f"[{self.user_id}] ✅ Switch successful (Strategy 7)")
+                                    qr_found = True
+                                    break
+                                time.sleep(0.5)
+                                
                     except Exception as e:
                         print(f"[{self.user_id}] ⚠️ Actions API strategy failed: {e}")
-
-                # Strategy 8: Brute Force Icon Click (New)
-                if not qr_found:
-                    try:
-                        print(f"[{self.user_id}] 🖱️ Strategy 8: Brute Force Icon Click...")
-                        # Use the container found in Strategy 7 or find it again
-                        if not container:
-                             sms_text = page.ele('text:短信登录', timeout=1)
-                             if sms_text:
-                                curr = sms_text.parent()
-                                for _ in range(10):
-                                    if not curr: break
-                                    try:
-                                        rect = curr.rect
-                                        if rect and rect.size[0] > 200 and rect.size[1] > 200:
-                                            container = curr
-                                            break
-                                    except:
-                                        pass
-                                    curr = curr.parent()
-                        
-                        if container:
-                            # Find all potential switch buttons (svg, img, div with icon class)
-                            candidates = container.eles('tag:svg') + container.eles('tag:img')
-                            print(f"[{self.user_id}] 🔍 Found {len(candidates)} candidates for brute force click")
-                            
-                            for i, cand in enumerate(candidates):
-                                try:
-                                    # Skip if too large (likely not an icon)
-                                    if cand.rect.size[0] > 100 or cand.rect.size[1] > 100:
-                                        continue
-                                        
-                                    print(f"[{self.user_id}] 🖱️ Clicking candidate {i+1}...")
-                                    cand.click(by_js=True) # Try JS click first
-                                    time.sleep(0.5)
-                                    
-                                    if page.wait.ele('tag:canvas', timeout=1) or page.wait.ele('tag:img[src*="base64"]', timeout=1):
-                                        print(f"[{self.user_id}] ✅ Switch successful (Strategy 8 - Candidate {i+1})")
-                                        qr_found = True
-                                        break
-                                        
-                                    # Try regular click if JS failed to trigger
-                                    cand.click()
-                                    time.sleep(0.5)
-                                    if page.wait.ele('tag:canvas', timeout=1) or page.wait.ele('tag:img[src*="base64"]', timeout=1):
-                                        print(f"[{self.user_id}] ✅ Switch successful (Strategy 8 - Candidate {i+1})")
-                                        qr_found = True
-                                        break
-                                except Exception as e:
-                                    print(f"[{self.user_id}] ⚠️ Error clicking candidate {i}: {e}")
-                    except Exception as e:
-                         print(f"[{self.user_id}] ⚠️ Brute Force strategy failed: {e}")
 
                 if not qr_found:
                      print(f"[{self.user_id}] ⚠️ All switch strategies failed or QR did not appear")
