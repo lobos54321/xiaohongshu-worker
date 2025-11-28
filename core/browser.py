@@ -273,43 +273,98 @@ class BrowserManager:
                         print(f"[{self.user_id}] 🖱️ Strategy 7: DrissionPage Actions API...")
                         from DrissionPage.common import Actions
                         
-                        # Find login box
+                        # Find login box with robust traversal
                         sms_text = page.ele('text:短信登录', timeout=1)
+                        container = None
                         if sms_text:
-                            container = sms_text.parent()
-                            for _ in range(5):
-                                if not container: break
+                            curr = sms_text.parent()
+                            for _ in range(10): # Traverse up to 10 levels
+                                if not curr: break
                                 try:
-                                    rect = container.rect
-                                    if not rect: continue
-                                    w = rect.size[0] if hasattr(rect, 'size') else rect.width
-                                    h = rect.size[1] if hasattr(rect, 'size') else rect.height
-                                    if 200 < w < 600 and 200 < h < 600:
+                                    rect = curr.rect
+                                    if rect and rect.size[0] > 200 and rect.size[1] > 200:
+                                        container = curr
+                                        print(f"[{self.user_id}] 📦 Found valid container: {curr.tag} ({rect.size})")
                                         break
                                 except:
                                     pass
-                                container = container.parent()
+                                curr = curr.parent()
                                 
-                            if container:
-                                rect = container.rect
-                                cx = rect.location[0] if hasattr(rect, 'location') else (rect[0] if isinstance(rect, tuple) else rect.x)
-                                cy = rect.location[1] if hasattr(rect, 'location') else (rect[1] if isinstance(rect, tuple) else rect.y)
-                                cw = rect.size[0] if hasattr(rect, 'size') else rect.width
-                                
-                                # Target: Top-Right corner
-                                target_x = cx + cw - 25
-                                target_y = cy + 25
-                                
-                                ac = Actions(page)
-                                ac.move_to((target_x, target_y)).click()
-                                if page.wait.ele('tag:canvas', timeout=2) or page.wait.ele('tag:img[src*="base64"]', timeout=2):
-                                    print(f"[{self.user_id}] ✅ Switch successful (Strategy 7)")
-                                    qr_found = True
+                        if container:
+                            rect = container.rect
+                            cx = rect.location[0] if hasattr(rect, 'location') else (rect[0] if isinstance(rect, tuple) else rect.x)
+                            cy = rect.location[1] if hasattr(rect, 'location') else (rect[1] if isinstance(rect, tuple) else rect.y)
+                            cw = rect.size[0] if hasattr(rect, 'size') else rect.width
+                            
+                            # Target: Top-Right corner
+                            target_x = cx + cw - 25
+                            target_y = cy + 25
+                            
+                            ac = Actions(page)
+                            ac.move_to((target_x, target_y)).click()
+                            if page.wait.ele('tag:canvas', timeout=2) or page.wait.ele('tag:img[src*="base64"]', timeout=2):
+                                print(f"[{self.user_id}] ✅ Switch successful (Strategy 7)")
+                                qr_found = True
                     except Exception as e:
                         print(f"[{self.user_id}] ⚠️ Actions API strategy failed: {e}")
 
+                # Strategy 8: Brute Force Icon Click (New)
+                if not qr_found:
+                    try:
+                        print(f"[{self.user_id}] 🖱️ Strategy 8: Brute Force Icon Click...")
+                        # Use the container found in Strategy 7 or find it again
+                        if not container:
+                             sms_text = page.ele('text:短信登录', timeout=1)
+                             if sms_text:
+                                curr = sms_text.parent()
+                                for _ in range(10):
+                                    if not curr: break
+                                    try:
+                                        rect = curr.rect
+                                        if rect and rect.size[0] > 200 and rect.size[1] > 200:
+                                            container = curr
+                                            break
+                                    except:
+                                        pass
+                                    curr = curr.parent()
+                        
+                        if container:
+                            # Find all potential switch buttons (svg, img, div with icon class)
+                            candidates = container.eles('tag:svg') + container.eles('tag:img')
+                            print(f"[{self.user_id}] 🔍 Found {len(candidates)} candidates for brute force click")
+                            
+                            for i, cand in enumerate(candidates):
+                                try:
+                                    # Skip if too large (likely not an icon)
+                                    if cand.rect.size[0] > 100 or cand.rect.size[1] > 100:
+                                        continue
+                                        
+                                    print(f"[{self.user_id}] 🖱️ Clicking candidate {i+1}...")
+                                    cand.click(by_js=True) # Try JS click first
+                                    time.sleep(0.5)
+                                    
+                                    if page.wait.ele('tag:canvas', timeout=1) or page.wait.ele('tag:img[src*="base64"]', timeout=1):
+                                        print(f"[{self.user_id}] ✅ Switch successful (Strategy 8 - Candidate {i+1})")
+                                        qr_found = True
+                                        break
+                                        
+                                    # Try regular click if JS failed to trigger
+                                    cand.click()
+                                    time.sleep(0.5)
+                                    if page.wait.ele('tag:canvas', timeout=1) or page.wait.ele('tag:img[src*="base64"]', timeout=1):
+                                        print(f"[{self.user_id}] ✅ Switch successful (Strategy 8 - Candidate {i+1})")
+                                        qr_found = True
+                                        break
+                                except Exception as e:
+                                    print(f"[{self.user_id}] ⚠️ Error clicking candidate {i}: {e}")
+                    except Exception as e:
+                         print(f"[{self.user_id}] ⚠️ Brute Force strategy failed: {e}")
+
                 if not qr_found:
                      print(f"[{self.user_id}] ⚠️ All switch strategies failed or QR did not appear")
+                     # Dump container HTML for debugging
+                     if container:
+                         print(f"[{self.user_id}] 🐛 Container HTML Dump: {container.html[:500]}...")
 
             # 4. QR Detection (Proceed to existing detection logic)
             print(f"[{self.user_id}] 🔍 Starting QR detection loop...")
