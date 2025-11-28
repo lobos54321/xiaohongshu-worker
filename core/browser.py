@@ -192,7 +192,7 @@ class BrowserManager:
                                         break
                                         
                             # Strategy 5: JS Click Top-Right Corner (Fallback)
-                            if not switched:
+                            if not qr_found:
                                 print(f"[{self.user_id}] 🖱️ Strategy 5: JS Click Top-Right of Login Box...")
                                 js_code = """
                                     var box = arguments[0];
@@ -205,12 +205,15 @@ class BrowserManager:
                                     return [x, y];
                                 """
                                 page.run_js(js_code, container)
-                                switched = True
+                                if page.wait.ele('tag:canvas', timeout=2) or page.wait.ele('tag:img[src*="base64"]', timeout=2):
+                                    print(f"[{self.user_id}] ✅ Switch successful (Strategy 5)")
+                                    qr_found = True
+
                     except Exception as e:
                         print(f"[{self.user_id}] ⚠️ Geometric/JS strategy failed: {e}")
                 
-                # Strategy 6: Real Mouse Event Simulation (New)
-                if not switched:
+                # Strategy 6: Real Mouse Event Simulation
+                if not qr_found:
                     try:
                         print(f"[{self.user_id}] 🖱️ Strategy 6: Simulating Real Mouse Events (JS)...")
                         # Find login container again if needed
@@ -219,16 +222,20 @@ class BrowserManager:
                             container = sms_text.parent()
                             for _ in range(5):
                                 if not container: break
-                                rect = container.rect
-                                w = rect.size[0] if hasattr(rect, 'size') else rect.width
-                                h = rect.size[1] if hasattr(rect, 'size') else rect.height
-                                if 200 < w < 600 and 200 < h < 600:
-                                    break
+                                try:
+                                    rect = container.rect
+                                    # Check if rect is valid
+                                    if not rect: continue
+                                    w = rect.size[0] if hasattr(rect, 'size') else rect.width
+                                    h = rect.size[1] if hasattr(rect, 'size') else rect.height
+                                    if 200 < w < 600 and 200 < h < 600:
+                                        break
+                                except:
+                                    pass
                                 container = container.parent()
                             
                             if container:
                                 rect = container.rect
-                                # Target: Top-Right corner (right - 20, top + 20)
                                 cx = rect.location[0] if hasattr(rect, 'location') else (rect[0] if isinstance(rect, tuple) else rect.x)
                                 cy = rect.location[1] if hasattr(rect, 'location') else (rect[1] if isinstance(rect, tuple) else rect.y)
                                 cw = rect.size[0] if hasattr(rect, 'size') else rect.width
@@ -254,12 +261,14 @@ class BrowserManager:
                                     return false;
                                 """
                                 page.run_js(js_mouse_event)
-                                switched = True
+                                if page.wait.ele('tag:canvas', timeout=2) or page.wait.ele('tag:img[src*="base64"]', timeout=2):
+                                    print(f"[{self.user_id}] ✅ Switch successful (Strategy 6)")
+                                    qr_found = True
                     except Exception as e:
                         print(f"[{self.user_id}] ⚠️ Real Mouse Event strategy failed: {e}")
 
-                # Strategy 7: DrissionPage Actions API (New)
-                if not switched:
+                # Strategy 7: DrissionPage Actions API
+                if not qr_found:
                     try:
                         print(f"[{self.user_id}] 🖱️ Strategy 7: DrissionPage Actions API...")
                         from DrissionPage.common import Actions
@@ -270,11 +279,15 @@ class BrowserManager:
                             container = sms_text.parent()
                             for _ in range(5):
                                 if not container: break
-                                rect = container.rect
-                                w = rect.size[0] if hasattr(rect, 'size') else rect.width
-                                h = rect.size[1] if hasattr(rect, 'size') else rect.height
-                                if 200 < w < 600 and 200 < h < 600:
-                                    break
+                                try:
+                                    rect = container.rect
+                                    if not rect: continue
+                                    w = rect.size[0] if hasattr(rect, 'size') else rect.width
+                                    h = rect.size[1] if hasattr(rect, 'size') else rect.height
+                                    if 200 < w < 600 and 200 < h < 600:
+                                        break
+                                except:
+                                    pass
                                 container = container.parent()
                                 
                             if container:
@@ -288,20 +301,20 @@ class BrowserManager:
                                 target_y = cy + 25
                                 
                                 ac = Actions(page)
-                                ac.move_to((target_x, target_y)).click().perform()
-                                switched = True
+                                ac.move_to((target_x, target_y)).click()
+                                if page.wait.ele('tag:canvas', timeout=2) or page.wait.ele('tag:img[src*="base64"]', timeout=2):
+                                    print(f"[{self.user_id}] ✅ Switch successful (Strategy 7)")
+                                    qr_found = True
                     except Exception as e:
                         print(f"[{self.user_id}] ⚠️ Actions API strategy failed: {e}")
 
-                # Wait for QR to appear
-                try:
-                    page.wait.ele('tag:canvas', timeout=3)
-                    print(f"[{self.user_id}] ✅ Switch successful (QR appeared)")
-                except:
-                    print(f"[{self.user_id}] ⚠️ Switch action performed but QR did not appear")
+                if not qr_found:
+                     print(f"[{self.user_id}] ⚠️ All switch strategies failed or QR did not appear")
 
             # 4. QR Detection (Proceed to existing detection logic)
             print(f"[{self.user_id}] 🔍 Starting QR detection loop...")
+            
+            qr_box = None  # Initialize to prevent UnboundLocalError
             
             def is_valid_qr(ele):
                 if not ele: return False
