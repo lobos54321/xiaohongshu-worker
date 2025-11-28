@@ -175,37 +175,43 @@ class BrowserManager:
                                         target_btn = None
                                         
                                         for svg in svgs:
-                                            s_rect = svg.rect
-                                            if not s_rect: continue
-                                            
-                                            # Relative position
-                                            sx = s_rect.location[0] if hasattr(s_rect, 'location') else (s_rect[0] if isinstance(s_rect, tuple) else s_rect.x)
-                                            sy = s_rect.location[1] if hasattr(s_rect, 'location') else (s_rect[1] if isinstance(s_rect, tuple) else s_rect.y)
-                                            
-                                            cx = rect.location[0] if hasattr(rect, 'location') else (rect[0] if isinstance(rect, tuple) else rect.x)
-                                            cy = rect.location[1] if hasattr(rect, 'location') else (rect[1] if isinstance(rect, tuple) else rect.y)
-                                            
-                                            rel_x = sx - cx
-                                            rel_y = sy - cy
-                                            
-                                            # Check Top-Left (common for "Back" or "Switch")
-                                            if 0 <= rel_x < 80 and 0 <= rel_y < 80:
-                                                print(f"[{self.user_id}] 🎯 Found Top-Left SVG")
-                                                target_btn = svg
-                                                break
-                                            
-                                            # Check Top-Right (common for "QR/PC Switch")
-                                            if (w - 80) < rel_x < w and 0 <= rel_y < 80:
-                                                print(f"[{self.user_id}] 🎯 Found Top-Right SVG")
-                                                target_btn = svg
-                                                break
+                                            try:
+                                                # Skip invisible or tiny SVGs
+                                                if not svg.states.is_visible: continue
+                                                
+                                                s_rect = svg.rect
+                                                if not s_rect: continue
+                                                
+                                                # Relative position
+                                                sx = s_rect.location[0] if hasattr(s_rect, 'location') else (s_rect[0] if isinstance(s_rect, tuple) else s_rect.x)
+                                                sy = s_rect.location[1] if hasattr(s_rect, 'location') else (s_rect[1] if isinstance(s_rect, tuple) else s_rect.y)
+                                                
+                                                cx = rect.location[0] if hasattr(rect, 'location') else (rect[0] if isinstance(rect, tuple) else rect.x)
+                                                cy = rect.location[1] if hasattr(rect, 'location') else (rect[1] if isinstance(rect, tuple) else rect.y)
+                                                
+                                                rel_x = sx - cx
+                                                rel_y = sy - cy
+                                                
+                                                # Check Top-Left (common for "Back" or "Switch")
+                                                if 0 <= rel_x < 80 and 0 <= rel_y < 80:
+                                                    print(f"[{self.user_id}] 🎯 Found Top-Left SVG")
+                                                    target_btn = svg
+                                                    break
+                                                
+                                                # Check Top-Right (common for "QR/PC Switch")
+                                                if (w - 80) < rel_x < w and 0 <= rel_y < 80:
+                                                    print(f"[{self.user_id}] 🎯 Found Top-Right SVG")
+                                                    target_btn = svg
+                                                    break
+                                            except:
+                                                continue
                                         
                                         # Action: Click Button or Coordinate
                                         if target_btn:
                                             print(f"[{self.user_id}] 🖱️ Clicking found SVG button...")
                                             target_btn.click()
                                         else:
-                                            print(f"[{self.user_id}] 🖱️ No SVG found, clicking Top-Right coordinate...")
+                                            print(f"[{self.user_id}] 🖱️ No SVG found, clicking Top-Right coordinate (Fallback)...")
                                             # Click 25px from top-right
                                             cx = rect.location[0] if hasattr(rect, 'location') else (rect[0] if isinstance(rect, tuple) else rect.x)
                                             cy = rect.location[1] if hasattr(rect, 'location') else (rect[1] if isinstance(rect, tuple) else rect.y)
@@ -238,7 +244,6 @@ class BrowserManager:
                 if not qr_found:
                      print(f"[{self.user_id}] ⚠️ Switch failed. Dumping page structure...")
                      try:
-                         # Dump simplified structure
                          print(f"[{self.user_id}] Page Title: {page.title}")
                      except: pass
 
@@ -250,6 +255,9 @@ class BrowserManager:
             def is_valid_qr(ele):
                 if not ele: return False
                 try:
+                    # Check visibility first
+                    if not ele.states.is_visible: return False
+                    
                     # Check size - QR code should be reasonably large
                     # Relaxed check to > 50px to avoid false negatives
                     rect = ele.rect
