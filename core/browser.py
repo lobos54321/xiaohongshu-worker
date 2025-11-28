@@ -153,9 +153,11 @@ class BrowserManager:
                         sms_text = page.ele('text:短信登录', timeout=2)
                         
                         if sms_text:
+                        if sms_text:
                             curr = sms_text.parent()
                             # Traverse up to find the best container
-                            for i in range(10): 
+                            found_container = False
+                            for i in range(5): 
                                 if not curr: break
                                 try:
                                     rect = curr.rect
@@ -166,9 +168,10 @@ class BrowserManager:
                                     w = rect.size[0] if hasattr(rect, 'size') else rect.width
                                     h = rect.size[1] if hasattr(rect, 'size') else rect.height
                                     
-                                    # Check if this looks like a login box (at least 250x250)
-                                    if w > 250 and h > 250:
-                                        print(f"[{self.user_id}] 📦 Checking container level {i}: {curr.tag} ({w}x{h})")
+                                    # Check if this looks like a login box (at least 300x300)
+                                    if w > 300 and h > 300:
+                                        print(f"[{self.user_id}] 📦 Found login container: {curr.tag} ({w}x{h})")
+                                        found_container = True
                                         
                                         # 1. Try to find an SVG switch button in corners
                                         svgs = curr.eles('tag:svg')
@@ -219,22 +222,28 @@ class BrowserManager:
                                             ac = Actions(page)
                                             ac.move_to((target_x, target_y)).click()
                                         
-                                        # Wait for QR to appear
-                                        print(f"[{self.user_id}] ⏳ Waiting for QR code...")
-                                        for _ in range(6): # Wait 3 seconds
-                                            if page.ele('tag:canvas', timeout=0.1) or page.ele('tag:img[src*="base64"]', timeout=0.1):
-                                                print(f"[{self.user_id}] ✅ Switch successful!")
-                                                qr_found = True
-                                                switched = True
-                                                break
-                                            time.sleep(0.5)
+                                        # Wait for QR to render (Crucial for avoiding placeholder)
+                                        print(f"[{self.user_id}] ⏳ Waiting 2s for QR render...")
+                                        time.sleep(2)
                                         
-                                        if qr_found: break
+                                        # Check if successful
+                                        if page.ele('tag:canvas', timeout=1) or page.ele('tag:img[src*="base64"]', timeout=1):
+                                            print(f"[{self.user_id}] ✅ Switch successful!")
+                                            qr_found = True
+                                            switched = True
+                                        
+                                        break # Stop traversing once we found and clicked the container
                                         
                                 except Exception as e:
                                     print(f"[{self.user_id}] ⚠️ Error checking container: {e}")
                                 
                                 curr = curr.parent()
+                                
+                    except Exception as e:
+                        print(f"[{self.user_id}] ⚠️ Smart Switch strategy failed: {e}")
+
+                if not qr_found:
+                     print(f"[{self.user_id}] ⚠️ Switch failed. Dumping page structure...")
                                 
                     except Exception as e:
                         print(f"[{self.user_id}] ⚠️ Smart Switch strategy failed: {e}")
