@@ -319,16 +319,17 @@ class BrowserManager:
             def is_valid_qr(ele):
                 if not ele: return False
                 try:
-                    # Check size - QR code should be reasonably large (e.g. > 100px)
+                    # Check size - QR code should be reasonably large
+                    # Relaxed check to > 50px to avoid false negatives
                     rect = ele.rect
                     # Handle different rect attribute access methods
                     if hasattr(rect, 'size'):
-                        return rect.size[0] > 100 and rect.size[1] > 100
+                        return rect.size[0] > 50 and rect.size[1] > 50
                     elif hasattr(rect, 'width'):
-                        return rect.width > 100 and rect.height > 100
+                        return rect.width > 50 and rect.height > 50
                     else:
                         # Try as dict/tuple
-                        return rect[0] > 100 and rect[1] > 100
+                        return rect[0] > 50 and rect[1] > 50
                 except Exception as e:
                     print(f"[{self.user_id}] ⚠️ Error checking element size: {e}")
                     return False
@@ -338,10 +339,16 @@ class BrowserManager:
             imgs = page.eles('tag:img')
             for img in imgs:
                 src = img.attr('src')
-                if src and 'data:image/png;base64' in src and is_valid_qr(img):
-                    qr_box = img
-                    print(f"[{self.user_id}] ✅ QR found in img tag (base64)")
-                    break
+                if src and 'data:image' in src and 'base64' in src:
+                    # Check size
+                    if is_valid_qr(img):
+                        print(f"[{self.user_id}] ✅ QR found in img tag (base64)")
+                        # Extract base64 directly
+                        try:
+                            base64_str = src.split('base64,')[1]
+                            return {"status": "waiting_scan", "qr_image": base64_str}
+                        except IndexError:
+                            print(f"[{self.user_id}] ⚠️ Failed to parse base64 src")
             
             if not qr_box:
                 # Strategy 2: Look for canvas element
