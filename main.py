@@ -1,7 +1,7 @@
 import asyncio
 import os
 import time
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Union
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Header
 from pydantic import BaseModel
 from core.browser import BrowserManager
@@ -38,7 +38,7 @@ login_sessions: Dict[str, dict] = {}
 
 class PublishRequest(BaseModel):
     user_id: str
-    cookies: str
+    cookies: Union[str, List[Dict]]
     publish_type: str = "video" # "video" or "image"
     video_url: Optional[str] = None # Backward compatibility
     files: Optional[list[str]] = [] # List of URLs (video or images)
