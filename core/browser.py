@@ -143,6 +143,12 @@ class BrowserManager:
                 switched = False
                 qr_found = False # Initialize to prevent UnboundLocalError
                 
+                # 2. Check if already in QR mode (Optimization)
+                if page.ele('text:请扫码登录') or page.ele('text:Please scan'):
+                    print(f"[{self.user_id}] ✅ Already in QR mode, skipping switch.")
+                    switched = True
+                    qr_found = True # Mark as found so we skip the switch loop, but we still need to detect the element
+
                 # Strategy: Smart Switch (Consolidated)
                 if not switched:
                     try:
@@ -241,7 +247,7 @@ class BrowserManager:
                     except Exception as e:
                         print(f"[{self.user_id}] ⚠️ Smart Switch strategy failed: {e}")
 
-                if not qr_found:
+                if not qr_found and not switched:
                      print(f"[{self.user_id}] ⚠️ Switch failed. Dumping page structure...")
                      try:
                          print(f"[{self.user_id}] Page Title: {page.title}")
@@ -270,31 +276,31 @@ class BrowserManager:
                     print(f"[{self.user_id}] ⚠️ Error checking element size: {e}")
                     return False
 
-            # Strategy 1: Look for img element with base64 src (Found in analysis)
-            print(f"[{self.user_id}] 🔍 Strategy 1: Checking img elements with base64 src...")
-            imgs = page.eles('tag:img')
-            for img in imgs:
-                src = img.attr('src')
-                if src and 'data:image' in src and 'base64' in src:
-                    # Check size
-                    if is_valid_qr(img):
-                        print(f"[{self.user_id}] ✅ QR found in img tag (base64)")
-                        # Extract base64 directly
-                        try:
-                            base64_str = src.split('base64,')[1]
-                            return {"status": "waiting_scan", "qr_image": base64_str}
-                        except IndexError:
-                            print(f"[{self.user_id}] ⚠️ Failed to parse base64 src")
+            # Strategy 1: Look for canvas element (Prioritize Canvas over Img to avoid placeholder)
+            print(f"[{self.user_id}] 🔍 Strategy 1: Checking canvas elements...")
+            canvases = page.eles('tag:canvas')
+            for canvas in canvases:
+                if is_valid_qr(canvas):
+                    qr_box = canvas
+                    print(f"[{self.user_id}] ✅ QR found in canvas")
+                    break
             
             if not qr_box:
-                # Strategy 2: Look for canvas element
-                print(f"[{self.user_id}] 🔍 Strategy 2: Checking canvas elements...")
-                canvases = page.eles('tag:canvas')
-                for canvas in canvases:
-                    if is_valid_qr(canvas):
-                        qr_box = canvas
-                        print(f"[{self.user_id}] ✅ QR found in canvas")
-                        break
+                # Strategy 2: Look for img element with base64 src
+                print(f"[{self.user_id}] 🔍 Strategy 2: Checking img elements with base64 src...")
+                imgs = page.eles('tag:img')
+                for img in imgs:
+                    src = img.attr('src')
+                    if src and 'data:image' in src and 'base64' in src:
+                        # Check size
+                        if is_valid_qr(img):
+                            print(f"[{self.user_id}] ✅ QR found in img tag (base64)")
+                            # Extract base64 directly
+                            try:
+                                base64_str = src.split('base64,')[1]
+                                return {"status": "waiting_scan", "qr_image": base64_str}
+                            except IndexError:
+                                print(f"[{self.user_id}] ⚠️ Failed to parse base64 src")
             
             if not qr_box:
                 # Strategy 3: Look for div containing "qrcode" or "qr" in class name
