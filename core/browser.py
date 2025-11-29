@@ -93,6 +93,17 @@ class BrowserManager:
         print(f"[{self.user_id}] ✅ Browser started successfully")
         return self.page
 
+    def _get_cookies_dict(self):
+        """Get cookies as a dictionary {name: value}"""
+        if not self.page:
+            return {}
+        try:
+            cookies_list = self.page.cookies()
+            return {c['name']: c['value'] for c in cookies_list} if cookies_list else {}
+        except Exception as e:
+            print(f"[{self.user_id}] ⚠️ Failed to get cookies: {e}")
+            return {}
+
     def _is_valid_qr_size(self, element, min_size=80):
         """Check if element is large enough (likely a QR code)"""
         try:
@@ -120,8 +131,8 @@ class BrowserManager:
             page.wait.doc_loaded(timeout=10)
             
             # 2. Check if already logged in
-            cookies = page.cookies(as_dict=True)
-            if 'web_session' in cookies or 'a1' in cookies:
+            cookies_dict = self._get_cookies_dict()
+            if 'web_session' in cookies_dict or 'a1' in cookies_dict:
                 return {"status": "logged_in", "msg": "Already logged in"}
             
             # 3. Find and click login button
@@ -216,10 +227,10 @@ class BrowserManager:
             
         try:
             # Check cookies for login indicators
-            cookies = self.page.cookies(as_dict=True)
+            cookies_dict = self._get_cookies_dict()
             
             # Main site login success indicators
-            if 'web_session' in cookies or 'a1' in cookies:
+            if 'web_session' in cookies_dict or 'a1' in cookies_dict:
                 print(f"[{self.user_id}] 🍪 Found login cookies!")
                 
                 # Navigate to creator platform to verify access
