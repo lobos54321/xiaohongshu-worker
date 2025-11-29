@@ -160,6 +160,13 @@ class BrowserManager:
                 page.get(target_url)
                 page.wait.doc_loaded()
             
+            # Check if already logged in (web_session cookie)
+            cookies = page.cookies(as_dict=True)
+            if 'web_session' in cookies:
+                print(f"[{self.user_id}] 🍪 Found web_session cookie on Main Site, already logged in!")
+                return {"status": "logged_in", "msg": "Already logged in on Main Site"}
+            
+            # 2. Click Login Button
             # 2. Click Login Button
             # Try multiple selectors for the login button on main site
             print(f"[{self.user_id}] 🖱️ Looking for Login button...")
@@ -167,22 +174,30 @@ class BrowserManager:
                         page.ele('.login-btn', timeout=1) or \
                         page.ele('css:div[class*="login"]', timeout=1)
             
+            debug_dir = os.getcwd()
+            
             if login_btn:
-                print(f"[{self.user_id}] 🖱️ Clicking Login button...")
+                print(f"[{self.user_id}] 🖱️ Clicking Login button: {login_btn.tag} {login_btn.text}")
                 login_btn.click()
                 time.sleep(2) # Wait longer for modal
             else:
-                print(f"[{self.user_id}] ⚠️ Login button not found. Checking if already in login modal or logged in...")
+                print(f"[{self.user_id}] ⚠️ Login button not found. Dumping page text...")
+                try:
+                    print(f"[{self.user_id}] Page Title: {page.title}")
+                    # print(f"[{self.user_id}] Page Text: {page.text[:200]}...") 
+                except: pass
             
             # Debug: Save screenshot to see if modal opened
-            page.get_screenshot(path='.', name=f'debug_after_click_{self.user_id}.png')
+            shot_path = os.path.join(debug_dir, f'debug_after_click_{self.user_id}.png')
+            print(f"[{self.user_id}] 📸 Saving debug screenshot to {shot_path}")
+            page.get_screenshot(path=shot_path)
 
             # 3. Detect QR Code (Prioritize Canvas)
             print(f"[{self.user_id}] 🔍 Looking for QR code in modal...")
             qr_box = None
             
             # Wait for QR container to appear
-            for _ in range(10): # Poll for 5 seconds
+            for i in range(10): # Poll for 5 seconds
                 # Check for Canvas (Dynamic QR)
                 canvas = page.ele('tag:canvas', timeout=0.5)
                 if is_valid_qr(canvas):
@@ -216,7 +231,9 @@ class BrowserManager:
                     # Capture screenshot for debugging
                     base64_str = self.page.get_screenshot(as_base64=True)
                     # Save to disk for agent to view
-                    self.page.get_screenshot(path='.', name=f'debug_error_{self.user_id}.png')
+                    err_path = os.path.join(debug_dir, f'debug_error_{self.user_id}.png')
+                    print(f"[{self.user_id}] 📸 Saving error screenshot to {err_path}")
+                    self.page.get_screenshot(path=err_path)
                     return {"status": "error", "msg": "QR code not found", "debug_image": base64_str}
                 return {"status": "error", "msg": "QR code not found"}
 
