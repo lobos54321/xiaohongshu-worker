@@ -361,23 +361,23 @@ class BrowserManager:
                 # # Try to find the login container again to at least crop to that
                 # login_box = page.ele('css:div[class*="login-box"]', timeout=1)
                 # if not login_box:
-                     # Try finding by text anchor "扫码登录" parent
-                     anchor = page.ele('text:扫码登录', timeout=1)
-                     if anchor:
-                         # Go up 3 levels to find container
-                         try:
-                            login_box = anchor.parent().parent().parent()
-                         except:
-                            pass
+                     # # Try finding by text anchor "扫码登录" parent
+                     # anchor = page.ele('text:扫码登录', timeout=1)
+                     # if anchor:
+                     #     # Go up 3 levels to find container
+                     #     try:
+                     #        login_box = anchor.parent().parent().parent()
+                     #     except:
+                     #        pass
                 
-                if login_box:
-                    print(f"[{self.user_id}] 📸 Capturing login box as fallback")
-                    base64_str = login_box.get_screenshot(as_base64=True)
-                else:
-                    print(f"[{self.user_id}] 📸 Capturing full page as fallback")
-                    base64_str = page.get_screenshot(as_base64=True)
+                # if login_box:
+                #     print(f"[{self.user_id}] 📸 Capturing login box as fallback")
+                #     base64_str = login_box.get_screenshot(as_base64=True)
+                # else:
+                #     print(f"[{self.user_id}] 📸 Capturing full page as fallback")
+                #     base64_str = page.get_screenshot(as_base64=True)
                 
-                return {"status": "waiting_scan", "qr_image": base64_str}
+                # return {"status": "waiting_scan", "qr_image": base64_str}
 
         except Exception as e:
             print(f"[{self.user_id}] ❌ Error getting QR: {str(e)}")
