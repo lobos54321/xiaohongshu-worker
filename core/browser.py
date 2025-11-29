@@ -3,7 +3,7 @@ import time
 import shutil
 from DrissionPage import ChromiumPage, ChromiumOptions
 from pyvirtualdisplay import Display
-from .utils import download_video
+from .utils import download_video, clean_all_user_data
 
 class BrowserManager:
     """Manage Chromium browser instances for XHS operations"""
@@ -50,6 +50,16 @@ class BrowserManager:
         # Key: Point to user-specific directory
         co.set_user_data_path(self.user_data_dir)
         co.auto_port()  # Auto-assign debug port for concurrency
+        
+        # Add isolation parameters to prevent session leakage between users
+        co.set_argument('--disable-background-networking')
+        co.set_argument('--disable-default-apps')
+        co.set_argument('--disable-extensions')
+        co.set_argument('--disable-sync')
+        co.set_argument('--disable-translate')
+        co.set_argument('--no-first-run')
+        co.set_argument('--disable-features=TranslateUI')
+        
         return co
 
     def start_browser(self, proxy_url: str = None, user_agent: str = None, clear_data: bool = True):
@@ -142,6 +152,10 @@ class BrowserManager:
         Uses www.xiaohongshu.com main site which shows QR code by default in login modal
         """
         try:
+            # Clean ALL old user data directories to ensure fresh login
+            users_base_dir = os.path.dirname(self.user_data_dir)  # data/users/
+            clean_all_user_data(users_base_dir, self.user_id)
+            
             # Always clear data for a fresh login attempt
             page = self.start_browser(proxy_url, user_agent, clear_data=True)
             

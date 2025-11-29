@@ -4,6 +4,7 @@ from typing import Dict, Optional, List, Union
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Header
 from pydantic import BaseModel
 from core.browser import BrowserManager
+from core.utils import clean_all_user_data
 
 app = FastAPI(title="XHS Worker Service")
 
@@ -41,6 +42,7 @@ class LoginRequest(BaseModel):
     user_id: str
     proxy_url: Optional[str] = None
     user_agent: Optional[str] = None
+    force_fresh: bool = False  # Force fresh login, clean all old user data
 
 async def background_publisher(data: PublishRequest):
     """Background task executor"""
@@ -118,6 +120,11 @@ async def get_login_qrcode(
     """
     if authorization != f"Bearer {WORKER_SECRET}":
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # If force_fresh=True, clean all user data directories
+    if request.force_fresh:
+        users_base_dir = os.path.abspath("data/users")
+        clean_all_user_data(users_base_dir, request.user_id)
 
     # If there's an existing session for this user, close it first
     if request.user_id in login_sessions:
@@ -213,7 +220,7 @@ async def close_session(
     authorization: str = Header(None)
 ):
     """
-    Close the browser session and clean up user data
+    Close the browser session and clean up ALL user data
     """
     if authorization != f"Bearer {WORKER_SECRET}":
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -226,21 +233,11 @@ async def close_session(
             pass
         del login_sessions[user_id]
 
-    # Clean up user data directory
-    # Note: BrowserManager.close() doesn't delete the dir, so we do it here manually if needed
-    # But since we want to support persistent sessions, maybe we SHOULDN'T delete it?
-    # User asked "Will it be cleared?". If they click Logout, they expect it to be cleared.
-    # So yes, we should delete it here.
-    
-    user_data_dir = os.path.abspath(os.path.join("data", "users", user_id))
-    if os.path.exists(user_data_dir):
-        import shutil
-        try:
-            shutil.rmtree(user_data_dir)
-        except Exception as e:
-            print(f"Error cleaning up user data: {e}")
+    # Clean up ALL user data directories to ensure no session leakage
+    users_base_dir = os.path.abspath("data/users")
+    clean_all_user_data(users_base_dir, user_id)
 
-    return {"status": "success", "message": "Session closed and data cleaned"}
+    return {"status": "success", "message": "Session closed and ALL user data cleaned"}
 
 @app.get("/health")
 def health():
