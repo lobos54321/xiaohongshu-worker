@@ -153,7 +153,6 @@ class BrowserManager:
                         sms_text = page.ele('text:短信登录', timeout=2)
                         
                         if sms_text:
-                        if sms_text:
                             curr = sms_text.parent()
                             # Traverse up to find the best container
                             found_container = False
