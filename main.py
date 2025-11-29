@@ -184,6 +184,41 @@ async def check_login_status(
     else:
         return {"status": "waiting", "message": "Waiting for scan"}
 
+@app.delete("/api/v1/login/session/{user_id}")
+async def close_session(
+    user_id: str,
+    authorization: str = Header(None)
+):
+    """
+    Close the browser session and clean up user data
+    """
+    if authorization != f"Bearer {WORKER_SECRET}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # Close active session if exists
+    if user_id in login_sessions:
+        try:
+            login_sessions[user_id].close()
+        except:
+            pass
+        del login_sessions[user_id]
+
+    # Clean up user data directory
+    # Note: BrowserManager.close() doesn't delete the dir, so we do it here manually if needed
+    # But since we want to support persistent sessions, maybe we SHOULDN'T delete it?
+    # User asked "Will it be cleared?". If they click Logout, they expect it to be cleared.
+    # So yes, we should delete it here.
+    
+    user_data_dir = os.path.abspath(os.path.join("data", "users", user_id))
+    if os.path.exists(user_data_dir):
+        import shutil
+        try:
+            shutil.rmtree(user_data_dir)
+        except Exception as e:
+            print(f"Error cleaning up user data: {e}")
+
+    return {"status": "success", "message": "Session closed and data cleaned"}
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
