@@ -161,7 +161,10 @@ class BrowserManager:
                 page.wait.doc_loaded()
             
             # Check if already logged in (web_session cookie)
-            cookies = page.cookies(as_dict=True)
+            # Safe way to get cookies as dict
+            cookies_list = page.cookies
+            cookies = {c['name']: c['value'] for c in cookies_list}
+            
             if 'web_session' in cookies:
                 print(f"[{self.user_id}] 🍪 Found web_session cookie on Main Site, already logged in!")
                 return {"status": "logged_in", "msg": "Already logged in on Main Site"}
@@ -259,7 +262,10 @@ class BrowserManager:
 
             # 3. Check Cookies (Reliable)
             # If we have 'web_session', we are likely logged in
-            cookies = self.page.cookies(as_dict=True)
+            # Safe way to get cookies as dict
+            cookies_list = self.page.cookies
+            cookies = {c['name']: c['value'] for c in cookies_list}
+            
             if 'web_session' in cookies:
                 print(f"[{self.user_id}] 🍪 Found web_session cookie, forcing navigation to home...")
                 try:
