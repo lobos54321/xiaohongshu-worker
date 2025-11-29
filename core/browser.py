@@ -243,11 +243,7 @@ class BrowserManager:
 
                 if not qr_found:
                      print(f"[{self.user_id}] ⚠️ Switch failed. Dumping page structure...")
-                                
-                    except Exception as e:
-                        print(f"[{self.user_id}] ⚠️ Smart Switch strategy failed: {e}")
 
-                if not qr_found:
                      print(f"[{self.user_id}] ⚠️ Switch failed. Dumping page structure...")
                      try:
                          print(f"[{self.user_id}] Page Title: {page.title}")
