@@ -131,8 +131,7 @@ class BrowserManager:
             page.wait.doc_loaded(timeout=10)
             
             # 2. Check if already logged in
-            cookies_list = page.cookies()
-            cookies_dict = {c['name']: c['value'] for c in cookies_list} if cookies_list else {}
+            cookies_dict = self._get_cookies_dict()
             if 'web_session' in cookies_dict or 'a1' in cookies_dict:
                 return {"status": "logged_in", "msg": "Already logged in"}
             
