@@ -139,10 +139,15 @@ class BrowserManager:
                     src = img.attr('src')
                     if src and ('base64' in src or 'qr' in src):
                          # Check size to ensure it's the QR
-                         if img.rect.width > 100:
-                             qr_img = img.get_screenshot(as_base64=True)
-                             print(f"[{self.user_id}] 📸 Captured QR code from img")
-                             break
+                         try:
+                             width = img.run_js('return this.getBoundingClientRect().width')
+                             if width and width > 100:
+                                 qr_img = img.get_screenshot(as_base64=True)
+                                 print(f"[{self.user_id}] 📸 Captured QR code from img (width: {width})")
+                                 break
+                         except Exception as e:
+                             print(f"[{self.user_id}] ⚠️ Error checking img width: {e}")
+                             continue
                 if qr_img: break
                 
                 time.sleep(1)
