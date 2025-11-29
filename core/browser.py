@@ -145,55 +145,7 @@ class BrowserManager:
         except Exception as e:
             print(f"[{self.user_id}] ❌ Error getting QR code: {e}")
             return {"status": "error", "msg": str(e)}
-            else:
-                print(f"[{self.user_id}] ⚠️ QR element not found, falling back to full screenshot")
-                # Fallback: Capture the login box or full page
-                # Try to find the login container again to at least crop to that
-                login_box = page.ele('css:div[class*="login-box"]', timeout=1)
-                if not login_box:
-                     # Try finding by text anchor "扫码登录" parent
-                     anchor = page.ele('text:扫码登录', timeout=1)
-                     if anchor:
-                         # Go up 3 levels to find container
-                         try:
-                            login_box = anchor.parent().parent().parent()
-                         except:
-                            pass
-                
-                if login_box:
-                    print(f"[{self.user_id}] 📸 Capturing login box as fallback")
-                    base64_str = login_box.get_screenshot(as_base64=True)
-                else:
-                    print(f"[{self.user_id}] 📸 Capturing full page as fallback")
-                    base64_str = page.get_screenshot(as_base64=True)
-                
-                return {"status": "waiting_scan", "qr_image": base64_str}
 
-        except Exception as e:
-            print(f"[{self.user_id}] ❌ Error getting QR: {str(e)}")
-            
-            # Emergency fallback: try to capture whatever is on screen
-            try:
-                if self.page:
-                    print(f"[{self.user_id}] 🚨 Emergency fallback: capturing current page state")
-                    base64_str = self.page.get_screenshot(as_base64=True)
-                    # Save for debugging
-                    with open(f"error_qr_{self.user_id}.png", "wb") as f:
-                        import base64
-                        f.write(base64.b64decode(base64_str))
-                    return {"status": "waiting_scan", "qr_image": base64_str, "note": "emergency_fallback"}
-            except Exception as fallback_error:
-                print(f"[{self.user_id}] ❌ Emergency fallback also failed: {str(fallback_error)}")
-            
-            # Original error handling for debugging
-            try:
-                if page:
-                    page.get_screenshot(path='.', name='error_qr.png')
-                    with open('error_qr.html', 'w', encoding='utf-8') as f:
-                        f.write(page.html)
-            except:
-                pass
-            return {"status": "error", "msg": str(e)}
 
     def check_login_status(self):
         """
