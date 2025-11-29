@@ -162,7 +162,7 @@ class BrowserManager:
             
             # Check if already logged in (web_session cookie)
             # Safe way to get cookies as dict
-            cookies_list = page.cookies
+            cookies_list = page.cookies()
             cookies = {c['name']: c['value'] for c in cookies_list}
             
             if 'web_session' in cookies:
@@ -263,7 +263,7 @@ class BrowserManager:
             # 3. Check Cookies (Reliable)
             # If we have 'web_session', we are likely logged in
             # Safe way to get cookies as dict
-            cookies_list = self.page.cookies
+            cookies_list = self.page.cookies()
             cookies = {c['name']: c['value'] for c in cookies_list}
             
             if 'web_session' in cookies:
