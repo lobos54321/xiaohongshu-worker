@@ -52,7 +52,7 @@ class BrowserManager:
         co.auto_port()  # Auto-assign debug port for concurrency
         return co
 
-    def start_browser(self, proxy_url: str = None, user_agent: str = None):
+    def start_browser(self, proxy_url: str = None, user_agent: str = None, clear_data: bool = True):
         """Initialize browser session"""
         # Try to reuse existing page if it's alive
         if self.page:
@@ -65,15 +65,15 @@ class BrowserManager:
                 print(f"[{self.user_id}] ⚠️ Existing browser dead, restarting: {e}")
                 self.page = None
 
-        # Clean up user data directory before starting a new session (only if cold start)
-        # This ensures a fresh state for each login attempt or session
-        if os.path.exists(self.user_data_dir):
+        # Clean up user data directory before starting a new session (only if requested)
+        if clear_data and os.path.exists(self.user_data_dir):
             print(f"[{self.user_id}] 🗑️ Cleaning up user data directory: {self.user_data_dir}")
             try:
                 shutil.rmtree(self.user_data_dir)
             except Exception as e:
                 print(f"[{self.user_id}] ⚠️ Failed to clean user data directory: {e}")
-        os.makedirs(self.user_data_dir, exist_ok=True) # Recreate the directory
+        
+        os.makedirs(self.user_data_dir, exist_ok=True) # Ensure directory exists
 
         # Start virtual display (Linux required)
         import platform
@@ -88,23 +88,19 @@ class BrowserManager:
             print(f"[{self.user_id}] 🖥️ Started virtual display")
 
         co = self._get_options(proxy_url, user_agent)
-        print(f"[{self.user_id}] 🚀 Starting new browser instance...")
+        print(f"[{self.user_id}] 🚀 Starting new browser instance (clear_data={clear_data})...")
         self.page = ChromiumPage(co)
         print(f"[{self.user_id}] ✅ Browser started successfully")
         return self.page
 
     def get_login_qrcode(self, proxy_url: str = None, user_agent: str = None):
         """
-        Open login page, switch to QR mode, and return Base64 image
-        """
-    def get_login_qrcode(self, proxy_url: str = None, user_agent: str = None):
-        """
         Start browser and return QR code image (base64)
         Optimized for speed: checks for QR immediately
         """
         try:
-            start_time = time.time()
-            page = self.start_browser(proxy_url, user_agent)
+            # Always clear data for a fresh login attempt
+            page = self.start_browser(proxy_url, user_agent, clear_data=True)
             print(f"[{self.user_id}] ⏱️ Browser start/reuse took {time.time() - start_time:.2f}s")
             
             # 1. Quick Check: Are we already on login page with a QR code?
@@ -471,8 +467,8 @@ class BrowserManager:
         try:
             print(f"[{self.user_id}] 🚀 Starting publish task ({publish_type})...")
             
-            # 1. Start browser (if not already started)
-            page = self.start_browser(proxy_url, user_agent)
+            # 1. Start browser (reuse session data if available)
+            page = self.start_browser(proxy_url, user_agent, clear_data=False)
             
             # 2. Inject/Update Cookie
             page.get("https://creator.xiaohongshu.com")
