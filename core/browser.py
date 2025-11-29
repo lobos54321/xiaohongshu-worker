@@ -292,22 +292,23 @@ class BrowserManager:
                 if qr_box: break
                 time.sleep(0.5)
             
-            if not qr_box:
-                # Strategy 2: Look for img element with base64 src
-                print(f"[{self.user_id}] 🔍 Strategy 2: Checking img elements with base64 src...")
-                imgs = page.eles('tag:img')
-                for img in imgs:
-                    src = img.attr('src')
-                    if src and 'data:image' in src and 'base64' in src:
-                        # Check size
-                        if is_valid_qr(img):
-                            print(f"[{self.user_id}] ✅ QR found in img tag (base64)")
-                            # Extract base64 directly
-                            try:
-                                base64_str = src.split('base64,')[1]
-                                return {"status": "waiting_scan", "qr_image": base64_str}
-                            except IndexError:
-                                print(f"[{self.user_id}] ⚠️ Failed to parse base64 src")
+            # if not qr_box:
+            #     # Strategy 2: Look for img element with base64 src
+            #     # DISABLED: This often picks up the placeholder image. User requested NO FAKE IMAGES.
+            #     print(f"[{self.user_id}] 🔍 Strategy 2: Checking img elements with base64 src (DISABLED)...")
+            #     # imgs = page.eles('tag:img')
+            #     # for img in imgs:
+            #     #     src = img.attr('src')
+            #     #     if src and 'data:image' in src and 'base64' in src:
+            #     #         # Check size
+            #     #         if is_valid_qr(img):
+            #     #             print(f"[{self.user_id}] ✅ QR found in img tag (base64)")
+            #     #             # Extract base64 directly
+            #     #             try:
+            #     #                 base64_str = src.split('base64,')[1]
+            #     #                 return {"status": "waiting_scan", "qr_image": base64_str}
+            #     #             except IndexError:
+            #     #                 print(f"[{self.user_id}] ⚠️ Failed to parse base64 src")
             
             if not qr_box:
                 # Strategy 3: Look for div containing "qrcode" or "qr" in class name
@@ -353,11 +354,13 @@ class BrowserManager:
                 base64_str = qr_box.get_screenshot(as_base64=True)
                 return {"status": "waiting_scan", "qr_image": base64_str}
             else:
-                print(f"[{self.user_id}] ⚠️ QR element not found, falling back to full screenshot")
-                # Fallback: Capture the login box or full page
-                # Try to find the login container again to at least crop to that
-                login_box = page.ele('css:div[class*="login-box"]', timeout=1)
-                if not login_box:
+                print(f"[{self.user_id}] ⚠️ QR element not found. Raising exception to avoid fake image.")
+                raise Exception("QR code element not found (Canvas detection failed)")
+                # print(f"[{self.user_id}] ⚠️ QR element not found, falling back to full screenshot")
+                # # Fallback: Capture the login box or full page
+                # # Try to find the login container again to at least crop to that
+                # login_box = page.ele('css:div[class*="login-box"]', timeout=1)
+                # if not login_box:
                      # Try finding by text anchor "扫码登录" parent
                      anchor = page.ele('text:扫码登录', timeout=1)
                      if anchor:
