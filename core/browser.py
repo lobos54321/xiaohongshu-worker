@@ -54,24 +54,44 @@ class BrowserManager:
 
     def start_browser(self, proxy_url: str = None, user_agent: str = None, clear_data: bool = True):
         """Initialize browser session"""
-        # Try to reuse existing page if it's alive
-        if self.page:
-            try:
-                # Simple liveness check
-                if self.page.url:
-                    print(f"[{self.user_id}] ♻️ Reusing existing browser page")
-                    return self.page
-            except Exception as e:
-                print(f"[{self.user_id}] ⚠️ Existing browser dead, restarting: {e}")
+        
+        # If clear_data is True, we must close the existing browser and clean up first
+        if clear_data:
+            # Close existing page if it exists
+            if self.page:
+                print(f"[{self.user_id}] 🔒 Closing existing browser for fresh start...")
+                try:
+                    self.page.quit()
+                except:
+                    pass
                 self.page = None
-
-        # Clean up user data directory before starting a new session (only if requested)
-        if clear_data and os.path.exists(self.user_data_dir):
-            print(f"[{self.user_id}] 🗑️ Cleaning up user data directory: {self.user_data_dir}")
-            try:
-                shutil.rmtree(self.user_data_dir)
-            except Exception as e:
-                print(f"[{self.user_id}] ⚠️ Failed to clean user data directory: {e}")
+            
+            # Stop virtual display
+            if self.display:
+                try:
+                    self.display.stop()
+                except:
+                    pass
+                self.display = None
+            
+            # Clean up user data directory
+            if os.path.exists(self.user_data_dir):
+                print(f"[{self.user_id}] 🗑️ Cleaning up user data directory: {self.user_data_dir}")
+                try:
+                    shutil.rmtree(self.user_data_dir)
+                except Exception as e:
+                    print(f"[{self.user_id}] ⚠️ Failed to clean user data directory: {e}")
+        else:
+            # Only try to reuse existing page if clear_data is False
+            if self.page:
+                try:
+                    # Simple liveness check
+                    if self.page.url:
+                        print(f"[{self.user_id}] ♻️ Reusing existing browser page")
+                        return self.page
+                except Exception as e:
+                    print(f"[{self.user_id}] ⚠️ Existing browser dead, restarting: {e}")
+                    self.page = None
         
         os.makedirs(self.user_data_dir, exist_ok=True) # Ensure directory exists
 
