@@ -144,10 +144,16 @@ class BrowserManager:
                 qr_found = False # Initialize to prevent UnboundLocalError
                 
                 # 2. Check if already in QR mode
-                # If "短信登录" (SMS Login) is visible, it means we are currently in QR mode and can switch TO SMS.
-                # So we are ALREADY in the right place.
-                if page.ele('text:请扫码登录') or page.ele('text:Please scan') or page.ele('text:短信登录'):
-                    print(f"[{self.user_id}] ✅ Already in QR mode (found QR text or 'SMS Login' button), skipping switch.")
+                # Priority 1: If Canvas exists, we are definitely in QR mode.
+                if page.ele('tag:canvas'):
+                    print(f"[{self.user_id}] ✅ Already in QR mode (Canvas found), skipping switch.")
+                    switched = True
+                    qr_found = True
+                
+                # Priority 2: Text check (Strict)
+                # Removed 'text:短信登录' because it matches the TITLE of the SMS login form, causing false positives.
+                elif page.ele('text:请扫码登录') or page.ele('text:Please scan'):
+                    print(f"[{self.user_id}] ✅ Already in QR mode (found QR text), skipping switch.")
                     switched = True
                     qr_found = True # Mark as found to skip switch loop
 
