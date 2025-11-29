@@ -153,7 +153,6 @@ class BrowserManager:
                         sms_text = page.ele('text:短信登录', timeout=2)
                         
                         if sms_text:
-                        if sms_text:
                             curr = sms_text.parent()
                             # Traverse up to find the best container
                             found_container = False
@@ -238,12 +237,6 @@ class BrowserManager:
                                     print(f"[{self.user_id}] ⚠️ Error checking container: {e}")
                                 
                                 curr = curr.parent()
-                                
-                    except Exception as e:
-                        print(f"[{self.user_id}] ⚠️ Smart Switch strategy failed: {e}")
-
-                if not qr_found:
-                     print(f"[{self.user_id}] ⚠️ Switch failed. Dumping page structure...")
                                 
                     except Exception as e:
                         print(f"[{self.user_id}] ⚠️ Smart Switch strategy failed: {e}")
