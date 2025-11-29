@@ -131,14 +131,30 @@ async def get_login_qrcode(
     manager = BrowserManager(request.user_id)
     login_sessions[request.user_id] = manager
     
-    # Run synchronous browser op in thread pool
+    # Run synchronous browser op in thread pool with timeout
     loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(
-        None,
-        manager.get_login_qrcode,
-        request.proxy_url,
-        request.user_agent
-    )
+    try:
+        print(f"[{request.user_id}] 🚀 Requesting QR code...")
+        result = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                manager.get_login_qrcode,
+                request.proxy_url,
+                request.user_agent
+            ),
+            timeout=45.0
+        )
+        print(f"[{request.user_id}] ✅ QR code request completed: {result.get('status')}")
+    except asyncio.TimeoutError:
+        print(f"[{request.user_id}] ❌ QR code request timed out")
+        manager.close()
+        del login_sessions[request.user_id]
+        raise HTTPException(status_code=504, detail="Browser initialization timed out")
+    except Exception as e:
+        print(f"[{request.user_id}] ❌ QR code request failed: {e}")
+        manager.close()
+        del login_sessions[request.user_id]
+        raise HTTPException(status_code=500, detail=str(e))
     
     if result.get("status") == "error":
         # Cleanup on error
