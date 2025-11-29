@@ -280,13 +280,17 @@ class BrowserManager:
                     return False
 
             # Strategy 1: Look for canvas element (Prioritize Canvas over Img to avoid placeholder)
-            print(f"[{self.user_id}] 🔍 Strategy 1: Checking canvas elements...")
-            canvases = page.eles('tag:canvas')
-            for canvas in canvases:
-                if is_valid_qr(canvas):
-                    qr_box = canvas
-                    print(f"[{self.user_id}] ✅ QR found in canvas")
-                    break
+            # Add polling loop to give canvas time to render
+            print(f"[{self.user_id}] 🔍 Strategy 1: Checking canvas elements (Polling)...")
+            for _ in range(10): # Try for 5 seconds
+                canvases = page.eles('tag:canvas')
+                for canvas in canvases:
+                    if is_valid_qr(canvas):
+                        qr_box = canvas
+                        print(f"[{self.user_id}] ✅ QR found in canvas")
+                        break
+                if qr_box: break
+                time.sleep(0.5)
             
             if not qr_box:
                 # Strategy 2: Look for img element with base64 src
