@@ -185,18 +185,25 @@ async def check_login_status(
     
     if is_logged_in:
         # Login successful! 
-        # In a real app, you might want to extract cookies here and return them
-        # For now, we just return success, and the cookies are persisted in the volume
+        # Get cookies before closing the browser
+        cookies = await loop.run_in_executor(None, manager.get_cookies)
         
         # Cleanup the browser session as it's no longer needed for interaction
-        # But wait! If we close it, we might lose the session if not fully persisted to disk yet?
-        # DrissionPage/Chrome usually persists to User Data Dir immediately.
-        # Let's keep it open for a moment or close it. 
-        # For safety, let's close it to free resources.
         manager.close()
         del login_sessions[user_id]
         
-        return {"status": "success", "message": "Login successful"}
+        if cookies:
+            return {
+                "status": "success", 
+                "message": "Login successful",
+                "cookies": cookies
+            }
+        else:
+            # Login successful but cookies could not be extracted
+            return {
+                "status": "success", 
+                "message": "Login successful, but failed to extract cookies"
+            }
     else:
         return {"status": "waiting", "message": "Waiting for scan"}
 
