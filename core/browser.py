@@ -75,17 +75,16 @@ class BrowserManager:
         
         os.makedirs(self.user_data_dir, exist_ok=True) # Ensure directory exists
 
-        # Start virtual display (Linux required)
+        # Start virtual display (Linux required) - MOVED TO __init__
+        # We check if it's running, if not start it (safety check)
         import platform
-        if platform.system() == 'Linux':
+        if platform.system() == 'Linux' and not self.display:
             try:
-                if self.display:
-                    self.display.stop()
-            except:
-                pass
-            self.display = Display(visible=0, size=(1920, 1080))
-            self.display.start()
-            print(f"[{self.user_id}] 🖥️ Started virtual display")
+                self.display = Display(visible=0, size=(1920, 1080))
+                self.display.start()
+                print(f"[{self.user_id}] 🖥️ Started virtual display (lazy init)")
+            except Exception as e:
+                print(f"[{self.user_id}] ⚠️ Failed to start virtual display: {e}")
 
         co = self._get_options(proxy_url, user_agent)
         print(f"[{self.user_id}] 🚀 Starting new browser instance (clear_data={clear_data})...")
@@ -101,13 +100,15 @@ class BrowserManager:
         try:
             # Always clear data for a fresh login attempt
             page = self.start_browser(proxy_url, user_agent, clear_data=True)
-            print(f"[{self.user_id}] ⏱️ Browser start/reuse took {time.time() - start_time:.2f}s")
             
             # 2. Navigate to login page
             if "creator.xiaohongshu.com/login" not in page.url:
-                print(f"[{self.user_id}] 🌐 Navigating to login page...")
+                print(f"[{self.user_id}] 🌐 Navigating to login page... (Current: {page.url})")
+                time.sleep(2) # Wait for browser to warm up
                 page.get('https://creator.xiaohongshu.com/login', timeout=30)
-                page.wait.load_start()
+                page.wait.doc_loaded()
+                time.sleep(2) # Wait for redirect/render
+                print(f"[{self.user_id}] 📍 Navigation complete. Current URL: {page.url}")
             else:
                 print(f"[{self.user_id}] ⚡ Already on login page")
 
