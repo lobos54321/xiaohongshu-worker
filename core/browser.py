@@ -1,8 +1,16 @@
 import os
 import time
 import shutil
+import platform
 from DrissionPage import ChromiumPage, ChromiumOptions
-from pyvirtualdisplay import Display
+
+# Try to import pyvirtualdisplay for headless environments (Linux/Zeabur)
+try:
+    from pyvirtualdisplay import Display
+    HAS_DISPLAY = True
+except ImportError:
+    HAS_DISPLAY = False
+
 from .utils import download_video
 
 class BrowserManager:
@@ -10,6 +18,20 @@ class BrowserManager:
     
     def __init__(self, user_id: str):
         self.user_id = user_id
+        self.page = None
+        self.display = None
+        
+        # Start virtual display if on Linux and available
+        # This is crucial for Zeabur deployment to mimic a real screen
+        if HAS_DISPLAY and platform.system() == 'Linux':
+            try:
+                print(f"[{self.user_id}] 🖥️ Starting virtual display...")
+                self.display = Display(visible=0, size=(1920, 1080))
+                self.display.start()
+                print(f"[{self.user_id}] 🖥️ Virtual display started.")
+            except Exception as e:
+                print(f"[{self.user_id}] ⚠️ Failed to start virtual display: {e}")
+
         # === Enterprise Design: User Data Isolation ===
         # Each user's data is stored in a separate directory
         # In Zeabur, /app/data needs to be a mounted Volume
@@ -166,13 +188,19 @@ class BrowserManager:
                     break
                 
                 # Check for Img (Static QR - Main site might use img)
-                # On main site, img might be valid, but we still prefer canvas if available.
-                # Let's check img if canvas is not found.
                 img = page.ele('css:img[src*="qr"]', timeout=0.1)
                 if is_valid_qr(img):
                     qr_box = img
                     print(f"[{self.user_id}] ✅ QR found in img")
                     break
+                
+                # Fallback: Check for switch button (if QR not shown by default)
+                if not qr_box:
+                    switch_btn = page.ele('.login-switch', timeout=0.1) or page.ele('.auth-page-qrcode-switch', timeout=0.1)
+                    if switch_btn:
+                        print(f"[{self.user_id}] 🖱️ Found switch button, clicking...")
+                        switch_btn.click()
+                        time.sleep(1)
                     
                 time.sleep(0.5)
             
