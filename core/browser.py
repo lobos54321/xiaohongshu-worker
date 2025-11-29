@@ -95,41 +95,56 @@ class BrowserManager:
     def get_login_qrcode(self, proxy_url: str = None, user_agent: str = None):
         """
         Start browser and return QR code image (base64)
-        Optimized for speed: checks for QR immediately
+        Strategy: Main Site Login (www.xiaohongshu.com) -> Login Modal -> QR
         """
         try:
             # Always clear data for a fresh login attempt
             page = self.start_browser(proxy_url, user_agent, clear_data=True)
             
-            # 2. Navigate to login page
-            if "creator.xiaohongshu.com/login" not in page.url:
-                print(f"[{self.user_id}] 🌐 Navigating to login page... (Current: {page.url})")
-                time.sleep(2) # Wait for browser to warm up
-                page.get('https://creator.xiaohongshu.com/login', timeout=30)
+            # 2. Navigate to Main Site (Explore)
+            target_url = "https://www.xiaohongshu.com/explore"
+            if target_url not in page.url:
+                print(f"[{self.user_id}] 🌐 Navigating to Main Site: {target_url}")
+                page.get(target_url, timeout=30)
                 page.wait.doc_loaded()
-                time.sleep(2) # Wait for redirect/render
-                print(f"[{self.user_id}] 📍 Navigation complete. Current URL: {page.url}")
+                time.sleep(2)
+            
+            # 3. Check if we need to click "Login"
+            # Look for login button
+            login_btn = page.ele('text:登录', timeout=2) or page.ele('.login-btn', timeout=2) or page.ele('css:div[class*="login-btn"]', timeout=2)
+            
+            if login_btn:
+                print(f"[{self.user_id}] 🖱️ Found Login button, clicking...")
+                login_btn.click()
+                time.sleep(1) # Wait for modal
             else:
-                print(f"[{self.user_id}] ⚡ Already on login page")
+                print(f"[{self.user_id}] ⚠️ Login button not found (maybe already in modal or logged in?)")
 
-            # 2. Check if already logged in
-            if "creator/home" in page.url:
-                return {"status": "logged_in", "msg": "Already logged in"}
-
-            # 3. Wait for QR Code
-            print(f"[{self.user_id}] 🔍 Waiting for QR code...")
+            # 4. Wait for QR Code in Modal
+            print(f"[{self.user_id}] 🔍 Waiting for QR code in modal...")
             qr_img = None
             
-            # Simple polling for QR element
+            # Polling for QR element
             for i in range(10):
-                if page.ele('tag:canvas'):
-                    qr_img = page.ele('tag:canvas').get_screenshot(as_base64=True)
-                    print(f"[{self.user_id}] 📸 Captured QR code from canvas")
-                    break
-                elif page.ele('.qrcode-img'):
-                    qr_img = page.ele('.qrcode-img').get_screenshot(as_base64=True)
-                    print(f"[{self.user_id}] 📸 Captured QR code from img")
-                    break
+                # Main site usually uses img with base64 or canvas
+                # Try finding the QR container first
+                if page.ele('tag:canvas', timeout=0.5):
+                     qr_img = page.ele('tag:canvas').get_screenshot(as_base64=True)
+                     print(f"[{self.user_id}] 📸 Captured QR code from canvas")
+                     break
+                
+                # Try img with src containing 'qr' or base64
+                imgs = page.eles('tag:img')
+                for img in imgs:
+                    src = img.attr('src')
+                    if src and ('base64' in src or 'qr' in src):
+                         # Check size to ensure it's the QR
+                         if img.rect.width > 100:
+                             qr_img = img.get_screenshot(as_base64=True)
+                             print(f"[{self.user_id}] 📸 Captured QR code from img")
+                             break
+                if qr_img: break
+                
                 time.sleep(1)
             
             if not qr_img:
@@ -167,14 +182,21 @@ class BrowserManager:
             # If we have 'web_session', we are likely logged in
             cookies = self.page.cookies(as_dict=True)
             if 'web_session' in cookies:
-                print(f"[{self.user_id}] 🍪 Found web_session cookie, forcing navigation to home...")
-                try:
-                    self.page.get("https://creator.xiaohongshu.com/creator/home", timeout=10)
-                    # Double check after navigation
-                    if "creator/home" in self.page.url:
-                        return True
-                except:
-                    pass
+                print(f"[{self.user_id}] 🍪 Found web_session cookie")
+                
+                # If we are on www.xiaohongshu.com, we need to go to creator platform
+                if "creator.xiaohongshu.com" not in self.page.url:
+                     print(f"[{self.user_id}] 🔄 Redirecting from Main Site to Creator Platform...")
+                     try:
+                        self.page.get("https://creator.xiaohongshu.com/creator/home", timeout=15)
+                        self.page.wait.doc_loaded()
+                        time.sleep(2)
+                     except:
+                        pass
+
+                # Double check after navigation
+                if "creator/home" in self.page.url or self.page.ele('text:发布笔记', timeout=2):
+                    return True
                 
             return False
         except:
