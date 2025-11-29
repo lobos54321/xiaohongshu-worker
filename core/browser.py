@@ -94,7 +94,7 @@ class BrowserManager:
         return self.page
 
     def _is_valid_qr_size(self, element, min_size=80):
-        """检查元素是否足够大（可能是二维码）"""
+        """Check if element is large enough (likely a QR code)"""
         try:
             rect = element.rect
             if hasattr(rect, 'size'):
@@ -102,7 +102,7 @@ class BrowserManager:
             elif hasattr(rect, 'width'):
                 return rect.width > min_size and rect.height > min_size
             return False
-        except:
+        except Exception:
             return False
 
     def get_login_qrcode(self, proxy_url: str = None, user_agent: str = None):
@@ -135,11 +135,16 @@ class BrowserManager:
             if login_btn:
                 print(f"[{self.user_id}] 🖱️ Clicking login button...")
                 login_btn.click()
-                time.sleep(2)  # Wait for modal to appear
+                # Wait for modal to appear - try dynamic wait first, then fallback to sleep
+                modal = page.ele('css:[class*="modal"], css:[class*="dialog"], css:[class*="login-container"]', timeout=3)
+                if not modal:
+                    time.sleep(2)  # Fallback wait for modal to appear
             
-            # 4. Wait for QR code to render
+            # 4. Wait for QR code to render - try to detect canvas/img first
             print(f"[{self.user_id}] ⏳ Waiting for QR code to render...")
-            time.sleep(2)
+            qr_element = page.ele('tag:canvas', timeout=3) or page.ele('tag:img[src*="base64"]', timeout=2)
+            if not qr_element:
+                time.sleep(2)  # Fallback wait for QR to render
             
             # 5. Detect QR code
             qr_box = None
@@ -165,7 +170,7 @@ class BrowserManager:
                             try:
                                 base64_str = src.split('base64,')[1]
                                 return {"status": "waiting_scan", "qr_image": base64_str}
-                            except:
+                            except Exception:
                                 break
             
             # Strategy 3: div with qr class
@@ -197,7 +202,7 @@ class BrowserManager:
                 try:
                     base64_str = self.page.get_screenshot(as_base64=True)
                     return {"status": "waiting_scan", "qr_image": base64_str, "note": "emergency_fallback"}
-                except:
+                except Exception:
                     pass
             return {"status": "error", "msg": str(e)}
 
