@@ -170,10 +170,13 @@ class BrowserManager:
             if login_btn:
                 print(f"[{self.user_id}] 🖱️ Clicking Login button...")
                 login_btn.click()
-                time.sleep(1) # Wait for modal animation
+                time.sleep(2) # Wait longer for modal
             else:
                 print(f"[{self.user_id}] ⚠️ Login button not found. Checking if already in login modal or logged in...")
             
+            # Debug: Save screenshot to see if modal opened
+            page.get_screenshot(path='.', name=f'debug_after_click_{self.user_id}.png')
+
             # 3. Detect QR Code (Prioritize Canvas)
             print(f"[{self.user_id}] 🔍 Looking for QR code in modal...")
             qr_box = None
@@ -212,6 +215,8 @@ class BrowserManager:
                 if self.page:
                     # Capture screenshot for debugging
                     base64_str = self.page.get_screenshot(as_base64=True)
+                    # Save to disk for agent to view
+                    self.page.get_screenshot(path='.', name=f'debug_error_{self.user_id}.png')
                     return {"status": "error", "msg": "QR code not found", "debug_image": base64_str}
                 return {"status": "error", "msg": "QR code not found"}
 
