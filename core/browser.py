@@ -143,11 +143,13 @@ class BrowserManager:
                 switched = False
                 qr_found = False # Initialize to prevent UnboundLocalError
                 
-                # 2. Check if already in QR mode (Optimization)
-                if page.ele('text:请扫码登录') or page.ele('text:Please scan'):
-                    print(f"[{self.user_id}] ✅ Already in QR mode, skipping switch.")
+                # 2. Check if already in QR mode
+                # If "短信登录" (SMS Login) is visible, it means we are currently in QR mode and can switch TO SMS.
+                # So we are ALREADY in the right place.
+                if page.ele('text:请扫码登录') or page.ele('text:Please scan') or page.ele('text:短信登录'):
+                    print(f"[{self.user_id}] ✅ Already in QR mode (found QR text or 'SMS Login' button), skipping switch.")
                     switched = True
-                    qr_found = True # Mark as found so we skip the switch loop, but we still need to detect the element
+                    qr_found = True # Mark as found to skip switch loop
 
                 # Strategy: Smart Switch (Consolidated)
                 if not switched:
@@ -155,11 +157,12 @@ class BrowserManager:
                         print(f"[{self.user_id}] 🖱️ Strategy: Smart Switch (Traversing containers)...")
                         from DrissionPage.common import Actions
                         
-                        # Find "SMS Login" text as anchor
-                        sms_text = page.ele('text:短信登录', timeout=2)
+                        # Find "扫码登录" (Scan Code Login) text as anchor
+                        # If this exists, we are in SMS mode and need to switch TO QR.
+                        scan_text = page.ele('text:扫码登录', timeout=2)
                         
-                        if sms_text:
-                            curr = sms_text.parent()
+                        if scan_text:
+                            curr = scan_text.parent()
                             # Traverse up to find the best container
                             found_container = False
                             for i in range(5): 
