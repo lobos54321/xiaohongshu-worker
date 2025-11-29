@@ -75,16 +75,17 @@ class BrowserManager:
         
         os.makedirs(self.user_data_dir, exist_ok=True) # Ensure directory exists
 
-        # Start virtual display (Linux required) - MOVED TO __init__
-        # We check if it's running, if not start it (safety check)
+        # Start virtual display (Linux required)
         import platform
-        if platform.system() == 'Linux' and not self.display:
+        if platform.system() == 'Linux':
             try:
-                self.display = Display(visible=0, size=(1920, 1080))
-                self.display.start()
-                print(f"[{self.user_id}] 🖥️ Started virtual display (lazy init)")
-            except Exception as e:
-                print(f"[{self.user_id}] ⚠️ Failed to start virtual display: {e}")
+                if self.display:
+                    self.display.stop()
+            except:
+                pass
+            self.display = Display(visible=0, size=(1920, 1080))
+            self.display.start()
+            print(f"[{self.user_id}] 🖥️ Started virtual display")
 
         co = self._get_options(proxy_url, user_agent)
         print(f"[{self.user_id}] 🚀 Starting new browser instance (clear_data={clear_data})...")
@@ -95,77 +96,295 @@ class BrowserManager:
     def get_login_qrcode(self, proxy_url: str = None, user_agent: str = None):
         """
         Start browser and return QR code image (base64)
-        Strategy: Main Site Login (www.xiaohongshu.com) -> Login Modal -> QR
+        Optimized for speed: checks for QR immediately
         """
         try:
             # Always clear data for a fresh login attempt
             page = self.start_browser(proxy_url, user_agent, clear_data=True)
             
-            # 2. Navigate to Main Site (Explore)
-            target_url = "https://www.xiaohongshu.com/explore"
-            if target_url not in page.url:
-                print(f"[{self.user_id}] 🌐 Navigating to Main Site: {target_url}")
-                page.get(target_url, timeout=30)
-                page.wait.doc_loaded()
-                time.sleep(2)
-            
-            # 3. Check if we need to click "Login"
-            # Look for login button
-            login_btn = page.ele('text:登录', timeout=2) or page.ele('.login-btn', timeout=2) or page.ele('css:div[class*="login-btn"]', timeout=2)
-            
-            if login_btn:
-                print(f"[{self.user_id}] 🖱️ Found Login button, clicking...")
-                login_btn.click()
-                time.sleep(1) # Wait for modal
+            # 1. Quick Check: Are we already on login page with a QR code?
+            if "creator.xiaohongshu.com/login" in page.url:
+                print(f"[{self.user_id}] ⚡ Already on login page, checking for QR immediately...")
+                # Fast check for canvas or img
+                if page.ele('tag:canvas', timeout=0.5) or page.ele('.qrcode-img', timeout=0.5):
+                    print(f"[{self.user_id}] ✅ QR code already present, skipping navigation/refresh")
+                    # Jump straight to detection
+                    pass 
+                else:
+                    # Not found immediately, try reload
+                    print(f"[{self.user_id}] 🔄 QR not found, reloading page...")
+                    page.run_js('location.reload()')
+                    page.wait.load_start()
             else:
-                print(f"[{self.user_id}] ⚠️ Login button not found (maybe already in modal or logged in?)")
+                # Full navigation
+                print(f"[{self.user_id}] 🌐 Navigating to login page...")
+                page.get('https://creator.xiaohongshu.com/login', timeout=30)
 
-            # 4. Wait for QR Code in Modal
-            print(f"[{self.user_id}] 🔍 Waiting for QR code in modal...")
-            qr_img = None
+            # 2. Check if already logged in
+            if "creator/home" in page.url:
+                return {"status": "logged_in", "msg": "Already logged in"}
+
+            # 3. Switch to QR Code Mode (if needed)
+            # Wait briefly for page to settle
+            page.wait.doc_loaded(timeout=5)
             
-            # Polling for QR element
-            for i in range(10):
-                # Main site usually uses img with base64 or canvas
-                # Try finding the QR container first
-                if page.ele('tag:canvas', timeout=0.5):
-                     qr_img = page.ele('tag:canvas').get_screenshot(as_base64=True)
-                     print(f"[{self.user_id}] 📸 Captured QR code from canvas")
-                     break
+            # Check if we need to switch (look for SMS input or missing QR)
+            qr_present = page.ele('tag:canvas', timeout=1) or page.ele('.qrcode-img', timeout=1)
+            
+            if not qr_present:
+                print(f"[{self.user_id}] 👀 SMS mode detected (QR not found), attempting to switch...")
                 
-                # Try img with src containing 'qr' or base64
-                imgs = page.eles('tag:img')
+                # Try to find the switch button using multiple strategies
+                switched = False
+                qr_found = False # Initialize to prevent UnboundLocalError
+                
+                # Strategy: Smart Switch (Consolidated)
+                if not switched:
+                    try:
+                        print(f"[{self.user_id}] 🖱️ Strategy: Smart Switch (Traversing containers)...")
+                        from DrissionPage.common import Actions
+                        
+                        # Find "SMS Login" text as anchor
+                        sms_text = page.ele('text:短信登录', timeout=2)
+                        
+                        if sms_text:
+                            curr = sms_text.parent()
+                            # Traverse up to find the best container
+                            found_container = False
+                            for i in range(5): 
+                                if not curr: break
+                                try:
+                                    rect = curr.rect
+                                    if not rect: 
+                                        curr = curr.parent()
+                                        continue
+                                        
+                                    w = rect.size[0] if hasattr(rect, 'size') else rect.width
+                                    h = rect.size[1] if hasattr(rect, 'size') else rect.height
+                                    
+                                    # Check if this looks like a login box (at least 300x300)
+                                    if w > 300 and h > 300:
+                                        print(f"[{self.user_id}] 📦 Found login container: {curr.tag} ({w}x{h})")
+                                        found_container = True
+                                        
+                                        # 1. Try to find an SVG switch button in corners
+                                        svgs = curr.eles('tag:svg')
+                                        target_btn = None
+                                        
+                                        for svg in svgs:
+                                            try:
+                                                # Skip tiny SVGs
+                                                s_rect = svg.rect
+                                                if not s_rect: continue
+                                                
+                                                # Relative position
+                                                sx = s_rect.location[0] if hasattr(s_rect, 'location') else (s_rect[0] if isinstance(s_rect, tuple) else s_rect.x)
+                                                sy = s_rect.location[1] if hasattr(s_rect, 'location') else (s_rect[1] if isinstance(s_rect, tuple) else s_rect.y)
+                                                
+                                                cx = rect.location[0] if hasattr(rect, 'location') else (rect[0] if isinstance(rect, tuple) else rect.x)
+                                                cy = rect.location[1] if hasattr(rect, 'location') else (rect[1] if isinstance(rect, tuple) else rect.y)
+                                                
+                                                rel_x = sx - cx
+                                                rel_y = sy - cy
+                                                
+                                                # Check Top-Left (common for "Back" or "Switch")
+                                                if 0 <= rel_x < 80 and 0 <= rel_y < 80:
+                                                    print(f"[{self.user_id}] 🎯 Found Top-Left SVG")
+                                                    target_btn = svg
+                                                    break
+                                                
+                                                # Check Top-Right (common for "QR/PC Switch")
+                                                if (w - 80) < rel_x < w and 0 <= rel_y < 80:
+                                                    print(f"[{self.user_id}] 🎯 Found Top-Right SVG")
+                                                    target_btn = svg
+                                                    break
+                                            except:
+                                                continue
+                                        
+                                        # Action: Click Button or Coordinate
+                                        if target_btn:
+                                            print(f"[{self.user_id}] 🖱️ Clicking found SVG button...")
+                                            target_btn.click()
+                                        else:
+                                            print(f"[{self.user_id}] 🖱️ No SVG found, clicking Top-Right coordinate (Fallback)...")
+                                            # Click 25px from top-right
+                                            cx = rect.location[0] if hasattr(rect, 'location') else (rect[0] if isinstance(rect, tuple) else rect.x)
+                                            cy = rect.location[1] if hasattr(rect, 'location') else (rect[1] if isinstance(rect, tuple) else rect.y)
+                                            target_x = cx + w - 25
+                                            target_y = cy + 25
+                                            
+                                            ac = Actions(page)
+                                            ac.move_to((target_x, target_y)).click()
+                                        
+                                        # Wait for QR to render (Crucial for avoiding placeholder)
+                                        print(f"[{self.user_id}] ⏳ Waiting 2s for QR render...")
+                                        time.sleep(2)
+                                        
+                                        # Check if successful
+                                        if page.ele('tag:canvas', timeout=1) or page.ele('tag:img[src*="base64"]', timeout=1):
+                                            print(f"[{self.user_id}] ✅ Switch successful!")
+                                            qr_found = True
+                                            switched = True
+                                        
+                                        break # Stop traversing once we found and clicked the container
+                                        
+                                except Exception as e:
+                                    print(f"[{self.user_id}] ⚠️ Error checking container: {e}")
+                                
+                                curr = curr.parent()
+                                
+                    except Exception as e:
+                        print(f"[{self.user_id}] ⚠️ Smart Switch strategy failed: {e}")
+
+                if not qr_found:
+                     print(f"[{self.user_id}] ⚠️ Switch failed. Dumping page structure...")
+
+                     print(f"[{self.user_id}] ⚠️ Switch failed. Dumping page structure...")
+                     try:
+                         print(f"[{self.user_id}] Page Title: {page.title}")
+                     except: pass
+
+            # 4. QR Detection (Proceed to existing detection logic)
+            print(f"[{self.user_id}] 🔍 Starting QR detection loop...")
+            
+            qr_box = None  # Initialize to prevent UnboundLocalError
+            
+            def is_valid_qr(ele):
+                if not ele: return False
+                try:
+                    # Check size - QR code should be reasonably large
+                    # Relaxed check to > 50px to avoid false negatives
+                    rect = ele.rect
+                    # Handle different rect attribute access methods
+                    if hasattr(rect, 'size'):
+                        return rect.size[0] > 50 and rect.size[1] > 50
+                    elif hasattr(rect, 'width'):
+                        return rect.width > 50 and rect.height > 50
+                    else:
+                        # Try as dict/tuple
+                        return rect[0] > 50 and rect[1] > 50
+                except Exception as e:
+                    print(f"[{self.user_id}] ⚠️ Error checking element size: {e}")
+                    return False
+
+            # Strategy 1: Look for img element with base64 src (Found in analysis)
+            print(f"[{self.user_id}] 🔍 Strategy 1: Checking img elements with base64 src...")
+            imgs = page.eles('tag:img')
+            for img in imgs:
+                src = img.attr('src')
+                if src and 'data:image' in src and 'base64' in src:
+                    # Check size
+                    if is_valid_qr(img):
+                        print(f"[{self.user_id}] ✅ QR found in img tag (base64)")
+                        # Extract base64 directly
+                        try:
+                            base64_str = src.split('base64,')[1]
+                            return {"status": "waiting_scan", "qr_image": base64_str}
+                        except IndexError:
+                            print(f"[{self.user_id}] ⚠️ Failed to parse base64 src")
+            
+            if not qr_box:
+                # Strategy 2: Look for canvas element
+                print(f"[{self.user_id}] 🔍 Strategy 2: Checking canvas elements...")
+                canvases = page.eles('tag:canvas')
+                for canvas in canvases:
+                    if is_valid_qr(canvas):
+                        qr_box = canvas
+                        print(f"[{self.user_id}] ✅ QR found in canvas")
+                        break
+            
+            if not qr_box:
+                # Strategy 3: Look for div containing "qrcode" or "qr" in class name
+                print(f"[{self.user_id}] 🔍 Strategy 2: Checking div elements...")
+                divs = page.eles('css:div[class*="qrcode"], css:div[class*="qr-"]')
+                print(f"[{self.user_id}] 🔍 Found {len(divs)} divs")
+                for div in divs:
+                    if is_valid_qr(div):
+                        qr_box = div
+                        print(f"[{self.user_id}] ✅ QR found in div")
+                        break
+            
+            if not qr_box:
+                # Strategy 3: Look for img with qr in src or alt
+                print(f"[{self.user_id}] 🔍 Strategy 3: Checking img elements...")
+                imgs = page.eles('css:img[alt*="qr"], css:img[src*="qrcode"], css:img[alt*="scan"]')
+                print(f"[{self.user_id}] 🔍 Found {len(imgs)} imgs")
                 for img in imgs:
-                    src = img.attr('src')
-                    if src and ('base64' in src or 'qr' in src):
-                         # Check size to ensure it's the QR
+                    if is_valid_qr(img):
+                        qr_box = img
+                        print(f"[{self.user_id}] ✅ QR found in img")
+                        break
+            
+            if not qr_box:
+                # Strategy 4: By text content - find container with "扫码" nearby
+                print(f"[{self.user_id}] 🔍 Strategy 4: Checking text context...")
+                qr_text = page.ele('xpath://div[contains(text(), "扫码")]', timeout=2)
+                if qr_text:
+                    # Try to find canvas or img near this text
+                    parent = qr_text.parent()
+                    candidates = parent.eles('tag:canvas') + parent.eles('tag:img')
+                    print(f"[{self.user_id}] 🔍 Found {len(candidates)} candidates near text")
+                    for cand in candidates:
+                        if is_valid_qr(cand):
+                            qr_box = cand
+                            print(f"[{self.user_id}] ✅ QR found near text")
+                            break
+            
+            print(f"[{self.user_id}] 🔍 QR detection finished. Result: {qr_box}")
+            
+            if qr_box:
+                # Capture only the QR code area
+                base64_str = qr_box.get_screenshot(as_base64=True)
+                return {"status": "waiting_scan", "qr_image": base64_str}
+            else:
+                print(f"[{self.user_id}] ⚠️ QR element not found, falling back to full screenshot")
+                # Fallback: Capture the login box or full page
+                # Try to find the login container again to at least crop to that
+                login_box = page.ele('css:div[class*="login-box"]', timeout=1)
+                if not login_box:
+                     # Try finding by text anchor "扫码登录" parent
+                     anchor = page.ele('text:扫码登录', timeout=1)
+                     if anchor:
+                         # Go up 3 levels to find container
                          try:
-                             width = img.run_js('return this.getBoundingClientRect().width')
-                             if width and width > 100:
-                                 qr_img = img.get_screenshot(as_base64=True)
-                                 print(f"[{self.user_id}] 📸 Captured QR code from img (width: {width})")
-                                 break
-                         except Exception as e:
-                             print(f"[{self.user_id}] ⚠️ Error checking img width: {e}")
-                             continue
-                if qr_img: break
+                            login_box = anchor.parent().parent().parent()
+                         except:
+                            pass
                 
-                time.sleep(1)
-            
-            if not qr_img:
-                print(f"[{self.user_id}] ⚠️ QR code element not found, capturing full page")
-                qr_img = page.get_screenshot(as_base64=True)
+                if login_box:
+                    print(f"[{self.user_id}] 📸 Capturing login box as fallback")
+                    base64_str = login_box.get_screenshot(as_base64=True)
+                else:
+                    print(f"[{self.user_id}] 📸 Capturing full page as fallback")
+                    base64_str = page.get_screenshot(as_base64=True)
                 
-            return {
-                "status": "waiting", 
-                "qr_image": qr_img, 
-                "msg": "Please scan the QR code"
-            }
-            
-        except Exception as e:
-            print(f"[{self.user_id}] ❌ Error getting QR code: {e}")
-            return {"status": "error", "msg": str(e)}
+                return {"status": "waiting_scan", "qr_image": base64_str}
 
+        except Exception as e:
+            print(f"[{self.user_id}] ❌ Error getting QR: {str(e)}")
+            
+            # Emergency fallback: try to capture whatever is on screen
+            try:
+                if self.page:
+                    print(f"[{self.user_id}] 🚨 Emergency fallback: capturing current page state")
+                    base64_str = self.page.get_screenshot(as_base64=True)
+                    # Save for debugging
+                    with open(f"error_qr_{self.user_id}.png", "wb") as f:
+                        import base64
+                        f.write(base64.b64decode(base64_str))
+                    return {"status": "waiting_scan", "qr_image": base64_str, "note": "emergency_fallback"}
+            except Exception as fallback_error:
+                print(f"[{self.user_id}] ❌ Emergency fallback also failed: {str(fallback_error)}")
+            
+            # Original error handling for debugging
+            try:
+                if page:
+                    page.get_screenshot(path='.', name='error_qr.png')
+                    with open('error_qr.html', 'w', encoding='utf-8') as f:
+                        f.write(page.html)
+            except:
+                pass
+            return {"status": "error", "msg": str(e)}
 
     def check_login_status(self):
         """
@@ -187,21 +406,20 @@ class BrowserManager:
             # If we have 'web_session', we are likely logged in
             cookies = self.page.cookies(as_dict=True)
             if 'web_session' in cookies:
-                print(f"[{self.user_id}] 🍪 Found web_session cookie")
+                print(f"[{self.user_id}] 🍪 Found web_session cookie - Login successful!")
+                # Try to navigate to creator platform, but don't fail if navigation times out
+                # The cookie existence is the definitive proof of login success
+                try:
+                    if "creator.xiaohongshu.com" not in self.page.url:
+                        print(f"[{self.user_id}] 🔄 Attempting navigation to Creator Platform...")
+                        self.page.get("https://creator.xiaohongshu.com/creator/home", timeout=10)
+                        if "creator/home" in self.page.url:
+                            print(f"[{self.user_id}] ✅ Navigation successful")
+                except Exception as e:
+                    print(f"[{self.user_id}] ⚠️ Navigation failed: {e}, but login is valid (cookie exists)")
                 
-                # If we are on www.xiaohongshu.com, we need to go to creator platform
-                if "creator.xiaohongshu.com" not in self.page.url:
-                     print(f"[{self.user_id}] 🔄 Redirecting from Main Site to Creator Platform...")
-                     try:
-                        self.page.get("https://creator.xiaohongshu.com/creator/home", timeout=15)
-                        self.page.wait.doc_loaded()
-                        time.sleep(2)
-                     except:
-                        pass
-
-                # Double check after navigation
-                if "creator/home" in self.page.url or self.page.ele('text:发布笔记', timeout=2):
-                    return True
+                # Return True regardless of navigation result, cookie is proof of login
+                return True
                 
             return False
         except:
@@ -252,7 +470,7 @@ class BrowserManager:
         files: list of local file paths
         """
         try:
-            print(f"[{self.user_id}] 🚀 Starting publish task ({publish_type}) - v2 (Session Persistence Enabled)...")
+            print(f"[{self.user_id}] 🚀 Starting publish task ({publish_type})...")
             
             # 1. Start browser (reuse session data if available)
             page = self.start_browser(proxy_url, user_agent, clear_data=False)
