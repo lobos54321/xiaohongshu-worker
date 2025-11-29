@@ -334,9 +334,20 @@ class BrowserManager:
             page.get("https://creator.xiaohongshu.com")
             
             if cookies:
-                page.set.cookies(cookies)
-                page.refresh()
-                time.sleep(3)
+                try:
+                    # Parse cookies if string
+                    if isinstance(cookies, str):
+                        import json
+                        cookies_obj = json.loads(cookies)
+                    else:
+                        cookies_obj = cookies
+                        
+                    page.set.cookies(cookies_obj)
+                    page.refresh()
+                    time.sleep(3)
+                except Exception as e:
+                    print(f"[{self.user_id}] ⚠️ Error setting cookies: {e}")
+
 
             # 3. Check login status
             if "login" in page.url:
@@ -406,7 +417,10 @@ class BrowserManager:
         except Exception as e:
             print(f"[{self.user_id}] ❌ Error: {str(e)}")
             if self.page:
-                self.page.get_screenshot(path='/tmp', name=f'error_{self.user_id}.png')
+                debug_dir = os.getcwd()
+                err_path = os.path.join(debug_dir, f'error_publish_{self.user_id}.png')
+                print(f"[{self.user_id}] 📸 Saving publish error screenshot to {err_path}")
+                self.page.get_screenshot(path=err_path)
             return False, str(e)
             
         finally:
