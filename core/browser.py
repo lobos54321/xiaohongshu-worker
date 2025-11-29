@@ -116,10 +116,25 @@ class BrowserManager:
                     print(f"[{self.user_id}] 🔄 QR not found, reloading page...")
                     page.run_js('location.reload()')
                     page.wait.load_start()
-            else:
-                # Full navigation
+            # 2. Navigate if needed
+            if "creator.xiaohongshu.com/login" not in page.url:
                 print(f"[{self.user_id}] 🌐 Navigating to login page...")
-                page.get('https://creator.xiaohongshu.com/login', timeout=30)
+                for attempt in range(3):
+                    try:
+                        page.get('https://creator.xiaohongshu.com/login', timeout=30)
+                        page.wait.load_start()
+                        if "login" in page.url:
+                            break
+                        print(f"[{self.user_id}] ⚠️ Navigation attempt {attempt+1} failed (URL: {page.url}), retrying...")
+                        time.sleep(2)
+                    except Exception as e:
+                        print(f"[{self.user_id}] ⚠️ Navigation error: {e}")
+                
+                if "login" not in page.url:
+                    print(f"[{self.user_id}] ❌ Failed to navigate to login page. Current URL: {page.url}")
+                    # Don't return yet, let detection fail and capture screenshot of this wrong page
+            else:
+                print(f"[{self.user_id}] ⚡ Already on login page")
 
             # 2. Check if already logged in
             if "creator/home" in page.url:
