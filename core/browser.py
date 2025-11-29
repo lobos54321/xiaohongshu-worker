@@ -465,7 +465,7 @@ class BrowserManager:
         files: list of local file paths
         """
         try:
-            print(f"[{self.user_id}] 🚀 Starting publish task ({publish_type})...")
+            print(f"[{self.user_id}] 🚀 Starting publish task ({publish_type}) - v2 (Session Persistence Enabled)...")
             
             # 1. Start browser (reuse session data if available)
             page = self.start_browser(proxy_url, user_agent, clear_data=False)
