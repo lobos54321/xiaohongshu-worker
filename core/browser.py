@@ -165,7 +165,8 @@ class BrowserManager:
                         
                         # Find "扫码登录" (Scan Code Login) text as anchor
                         # If this exists, we are in SMS mode and need to switch TO QR.
-                        scan_text = page.ele('text:扫码登录', timeout=2)
+                        # Relaxed selector to include just "扫码" and increased timeout
+                        scan_text = page.ele('text:扫码登录', timeout=5) or page.ele('text:扫码', timeout=1)
                         
                         if scan_text:
                             curr = scan_text.parent()
