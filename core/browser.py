@@ -116,23 +116,40 @@ class BrowserManager:
                     print(f"[{self.user_id}] 🔄 QR not found, reloading page...")
                     page.run_js('location.reload()')
                     page.wait.load_start()
+            # 0. Setup Browser
+            try:
+                page.set.window.max()
+            except: pass
+            
+            # Connectivity Test
+            print(f"[{self.user_id}] 📡 Testing connectivity...")
+            try:
+                page.get("https://www.baidu.com", timeout=10)
+                print(f"[{self.user_id}] ✅ Connectivity check passed (Baidu)")
+            except Exception as e:
+                print(f"[{self.user_id}] ⚠️ Connectivity check failed: {e}")
+
             # 2. Navigate if needed
             if "creator.xiaohongshu.com/login" not in page.url:
                 print(f"[{self.user_id}] 🌐 Navigating to login page...")
                 for attempt in range(3):
                     try:
-                        page.get('https://creator.xiaohongshu.com/login', timeout=30)
+                        page.get('https://creator.xiaohongshu.com/login', timeout=30, retry=1)
                         page.wait.load_start()
+                        time.sleep(2) # Wait for redirect
                         if "login" in page.url:
                             break
                         print(f"[{self.user_id}] ⚠️ Navigation attempt {attempt+1} failed (URL: {page.url}), retrying...")
-                        time.sleep(2)
                     except Exception as e:
                         print(f"[{self.user_id}] ⚠️ Navigation error: {e}")
                 
                 if "login" not in page.url:
                     print(f"[{self.user_id}] ❌ Failed to navigate to login page. Current URL: {page.url}")
-                    # Don't return yet, let detection fail and capture screenshot of this wrong page
+                    # If we are still on the new tab page, try one last desperate measure: Main Site
+                    print(f"[{self.user_id}] 🔄 Trying fallback: Main Site -> Creator...")
+                    page.get("https://www.xiaohongshu.com/explore", timeout=30)
+                    time.sleep(2)
+                    page.get("https://creator.xiaohongshu.com/login", timeout=30)
             else:
                 print(f"[{self.user_id}] ⚡ Already on login page")
 
