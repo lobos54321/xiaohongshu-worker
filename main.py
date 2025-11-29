@@ -1,6 +1,6 @@
 import asyncio
 import os
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Union
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Header
 from pydantic import BaseModel
 from core.browser import BrowserManager
