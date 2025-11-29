@@ -238,8 +238,6 @@ class BrowserManager:
 
                 if not qr_found:
                      print(f"[{self.user_id}] ⚠️ Switch failed. Dumping page structure...")
-
-                     print(f"[{self.user_id}] ⚠️ Switch failed. Dumping page structure...")
                      try:
                          print(f"[{self.user_id}] Page Title: {page.title}")
                      except: pass
