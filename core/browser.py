@@ -103,53 +103,11 @@ class BrowserManager:
             page = self.start_browser(proxy_url, user_agent, clear_data=True)
             print(f"[{self.user_id}] ⏱️ Browser start/reuse took {time.time() - start_time:.2f}s")
             
-            # 1. Quick Check: Are we already on login page with a QR code?
-            if "creator.xiaohongshu.com/login" in page.url:
-                print(f"[{self.user_id}] ⚡ Already on login page, checking for QR immediately...")
-                # Fast check for canvas or img
-                if page.ele('tag:canvas', timeout=0.5) or page.ele('.qrcode-img', timeout=0.5):
-                    print(f"[{self.user_id}] ✅ QR code already present, skipping navigation/refresh")
-                    # Jump straight to detection
-                    pass 
-                else:
-                    # Not found immediately, try reload
-                    print(f"[{self.user_id}] 🔄 QR not found, reloading page...")
-                    page.run_js('location.reload()')
-                    page.wait.load_start()
-            # 0. Setup Browser
-            try:
-                page.set.window.max()
-            except: pass
-            
-            # Connectivity Test
-            print(f"[{self.user_id}] 📡 Testing connectivity...")
-            try:
-                page.get("https://www.baidu.com", timeout=10)
-                print(f"[{self.user_id}] ✅ Connectivity check passed (Baidu)")
-            except Exception as e:
-                print(f"[{self.user_id}] ⚠️ Connectivity check failed: {e}")
-
-            # 2. Navigate if needed
+            # 2. Navigate to login page
             if "creator.xiaohongshu.com/login" not in page.url:
                 print(f"[{self.user_id}] 🌐 Navigating to login page...")
-                for attempt in range(3):
-                    try:
-                        page.get('https://creator.xiaohongshu.com/login', timeout=30, retry=1)
-                        page.wait.load_start()
-                        time.sleep(2) # Wait for redirect
-                        if "login" in page.url:
-                            break
-                        print(f"[{self.user_id}] ⚠️ Navigation attempt {attempt+1} failed (URL: {page.url}), retrying...")
-                    except Exception as e:
-                        print(f"[{self.user_id}] ⚠️ Navigation error: {e}")
-                
-                if "login" not in page.url:
-                    print(f"[{self.user_id}] ❌ Failed to navigate to login page. Current URL: {page.url}")
-                    # If we are still on the new tab page, try one last desperate measure: Main Site
-                    print(f"[{self.user_id}] 🔄 Trying fallback: Main Site -> Creator...")
-                    page.get("https://www.xiaohongshu.com/explore", timeout=30)
-                    time.sleep(2)
-                    page.get("https://creator.xiaohongshu.com/login", timeout=30)
+                page.get('https://creator.xiaohongshu.com/login', timeout=30)
+                page.wait.load_start()
             else:
                 print(f"[{self.user_id}] ⚡ Already on login page")
 
