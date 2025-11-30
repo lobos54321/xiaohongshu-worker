@@ -162,7 +162,7 @@ class BrowserManager:
     def get_login_qrcode(self, proxy_url: str = None, user_agent: str = None):
         """
         Start browser and return QR code image (base64)
-        Always shows a fresh QR code, regardless of any existing login state.
+        Uses creator.xiaohongshu.com which always requires login.
         """
         try:
             # Clean ALL Chromium data storage locations (global config, cache, temp files)
@@ -175,68 +175,38 @@ class BrowserManager:
             # Always clear data for a fresh login attempt
             page = self.start_browser(proxy_url, user_agent, clear_data=True)
             
-            # 1. Navigate to main site
-            print(f"[{self.user_id}] 🌐 Navigating to xiaohongshu.com...")
-            page.get('https://www.xiaohongshu.com', timeout=30)
-            page.wait.doc_loaded(timeout=10)
+            # Navigate to creator platform (always requires login, even if main site thinks you're logged in)
+            print(f"[{self.user_id}] 🌐 Navigating to creator.xiaohongshu.com...")
+            page.get('https://creator.xiaohongshu.com', timeout=60)
             
-            # 🔥 Removed "already logged in" check - always try to show a fresh QR code
-            # The server may recognize the user by IP/device, but we use cookies from database for posting
+            # Wait for page load or redirect to login page
+            time.sleep(5)
+            print(f"[{self.user_id}] 📍 Current URL: {page.url}")
             
-            # 2. Try to find login button
-            print(f"[{self.user_id}] 🔍 Looking for login button...")
-            login_btn = page.ele('text:登录', timeout=5)
-            if not login_btn:
-                login_btn = page.ele('css:.login-btn', timeout=3)
-            if not login_btn:
-                login_btn = page.ele('css:[class*="login"]', timeout=3)
+            # Check if we're on the login page
+            if 'login' not in page.url.lower():
+                # If not auto-redirected to login page, navigate directly
+                print(f"[{self.user_id}] 🔄 Not on login page, navigating directly...")
+                page.get('https://creator.xiaohongshu.com/login', timeout=60)
+                time.sleep(5)
             
-            # 3. If no login button found, the page might show logged-in state
-            # Try to find and click logout/user menu to force re-login
-            if not login_btn:
-                print(f"[{self.user_id}] ⚠️ No login button found, page might show logged-in state")
-                print(f"[{self.user_id}] 🔄 Attempting to logout first...")
-                
-                # Try to find user avatar or menu that leads to logout
-                user_menu = page.ele('css:[class*="user"], css:[class*="avatar"], css:[class*="header-user"]', timeout=3)
-                if user_menu:
-                    user_menu.click()
-                    time.sleep(1)
-                    
-                    # Look for logout option
-                    logout_btn = page.ele('text:退出登录', timeout=2) or page.ele('text:退出', timeout=2)
-                    if logout_btn:
-                        logout_btn.click()
-                        print(f"[{self.user_id}] ✅ Clicked logout, waiting for page reload...")
-                        time.sleep(3)
-                        page.refresh()
-                        page.wait.doc_loaded(timeout=10)
-                        
-                        # Now try to find login button again
-                        login_btn = page.ele('text:登录', timeout=5)
-                
-                # If still no login button, try navigating to login page directly
-                if not login_btn:
-                    print(f"[{self.user_id}] 🔄 Navigating to login page directly...")
-                    page.get('https://www.xiaohongshu.com/login', timeout=30)
-                    page.wait.doc_loaded(timeout=10)
+            # Wait for login page to load
+            page.wait.doc_loaded(timeout=15)
+            time.sleep(3)
             
-            # 4. Click login button if found
-            if login_btn:
-                print(f"[{self.user_id}] 🖱️ Clicking login button...")
-                login_btn.click()
-                # Wait for modal to appear - try dynamic wait first, then fallback to sleep
-                modal = page.ele('css:[class*="modal"], css:[class*="dialog"], css:[class*="login-container"]', timeout=3)
-                if not modal:
-                    time.sleep(2)  # Fallback wait for modal to appear
+            # Switch to QR code login mode (if default is phone number login)
+            print(f"[{self.user_id}] 🔍 Looking for QR code login tab...")
+            qr_login_tab = page.ele('text:扫码登录', timeout=5)
+            if qr_login_tab:
+                print(f"[{self.user_id}] 🖱️ Clicking QR code login tab...")
+                qr_login_tab.click()
+                time.sleep(3)
             
-            # 5. Wait for QR code to render - try to detect canvas/img first
+            # Wait for QR code to render
             print(f"[{self.user_id}] ⏳ Waiting for QR code to render...")
-            qr_element = page.ele('tag:canvas', timeout=3) or page.ele('tag:img[src*="base64"]', timeout=2)
-            if not qr_element:
-                time.sleep(2)  # Fallback wait for QR to render
+            time.sleep(3)
             
-            # 6. Detect QR code
+            # Detect QR code
             qr_box = None
             
             # Strategy 1: canvas element
@@ -256,7 +226,6 @@ class BrowserManager:
                         if self._is_valid_qr_size(img):
                             qr_box = img
                             print(f"[{self.user_id}] ✅ Found QR in img (base64)")
-                            # Directly return base64 data
                             try:
                                 base64_str = src.split('base64,')[1]
                                 return {"status": "waiting_scan", "qr_image": base64_str}
@@ -265,35 +234,48 @@ class BrowserManager:
             
             # Strategy 3: div with qr class
             if not qr_box:
-                qr_divs = page.eles('css:[class*="qrcode"], css:[class*="qr-"]')
+                qr_divs = page.eles('css:[class*="qrcode"], css:[class*="qr-"], css:[class*="code-wrap"]')
                 for div in qr_divs:
                     if self._is_valid_qr_size(div):
                         qr_box = div
                         print(f"[{self.user_id}] ✅ Found QR in div")
                         break
             
+            # Strategy 4: Look for QR code by common container classes
+            if not qr_box:
+                qr_containers = page.eles('css:.qr-code, css:.login-qr, css:.scan-login, css:[class*="login-box"]')
+                for container in qr_containers:
+                    if self._is_valid_qr_size(container, min_size=100):
+                        qr_box = container
+                        print(f"[{self.user_id}] ✅ Found QR in container")
+                        break
+            
             if qr_box:
                 base64_str = qr_box.get_screenshot(as_base64=True)
                 return {"status": "waiting_scan", "qr_image": base64_str}
             else:
-                # Fallback: capture login modal area
-                print(f"[{self.user_id}] ⚠️ QR not found, capturing login modal...")
-                modal = page.ele('css:[class*="modal"], css:[class*="dialog"], css:[class*="login-container"]', timeout=2)
-                if modal:
-                    base64_str = modal.get_screenshot(as_base64=True)
+                # Fallback: capture the entire login area or page
+                print(f"[{self.user_id}] ⚠️ QR not found with standard methods, capturing page...")
+                
+                # Try to find login container
+                login_container = page.ele('css:[class*="login"], css:[class*="modal"], css:[class*="dialog"]', timeout=2)
+                if login_container:
+                    base64_str = login_container.get_screenshot(as_base64=True)
                 else:
                     base64_str = page.get_screenshot(as_base64=True)
-                return {"status": "waiting_scan", "qr_image": base64_str}
+                
+                return {"status": "waiting_scan", "qr_image": base64_str, "note": "fallback_screenshot"}
                 
         except Exception as e:
             print(f"[{self.user_id}] ❌ Error getting QR: {e}")
-            # Emergency fallback
+            # Emergency fallback: return page screenshot
             if self.page:
                 try:
+                    print(f"[{self.user_id}] 📸 Taking emergency screenshot...")
                     base64_str = self.page.get_screenshot(as_base64=True)
                     return {"status": "waiting_scan", "qr_image": base64_str, "note": "emergency_fallback"}
-                except Exception:
-                    pass
+                except Exception as screenshot_error:
+                    print(f"[{self.user_id}] ❌ Screenshot also failed: {screenshot_error}")
             return {"status": "error", "msg": str(e)}
 
     def check_login_status(self):
