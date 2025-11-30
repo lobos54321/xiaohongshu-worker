@@ -228,7 +228,10 @@ class BrowserManager:
                             click_x = rect.x + rect.width - 30
                             click_y = rect.y + 30
                             print(f"[{self.user_id}] 🖱️ Clicking top-right corner at ({click_x}, {click_y})")
-                            page.run_js(f'document.elementFromPoint({click_x}, {click_y}).click()')
+                            page.run_js(f'''
+                                var elem = document.elementFromPoint({click_x}, {click_y});
+                                if (elem && typeof elem.click === 'function') elem.click();
+                            ''')
                             qr_switch_clicked = True
                             time.sleep(2)
                     except Exception as e:
@@ -275,11 +278,14 @@ class BrowserManager:
                         if self._is_valid_qr_size(img):
                             print(f"[{self.user_id}] ✅ Found QR in img (base64)")
                             try:
-                                base64_str = src.split('base64,')[1]
-                                return {"status": "waiting_scan", "qr_image": base64_str}
-                            except Exception:
-                                qr_box = img
-                                break
+                                parts = src.split('base64,')
+                                if len(parts) > 1:
+                                    base64_str = parts[1]
+                                    return {"status": "waiting_scan", "qr_image": base64_str}
+                            except (IndexError, ValueError):
+                                pass
+                            qr_box = img
+                            break
             
             # Strategy 3: Find qrcode related class
             if not qr_box:
