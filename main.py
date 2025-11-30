@@ -1,12 +1,24 @@
 import asyncio
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from datetime import datetime
 from typing import Dict, Optional, List, Union
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Header
 from pydantic import BaseModel
 from core.browser import BrowserManager
 from core.utils import clean_all_user_data
+from core.ai_agent import AutoContentManager
+
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="XHS Worker Service")
+
+# Ensure image directory exists
+os.makedirs("data/images", exist_ok=True)
+app.mount("/images", StaticFiles(directory="data/images"), name="images")
 
 # === CORS Configuration ===
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +38,9 @@ MAX_CONCURRENT_BROWSERS = asyncio.Semaphore(2)
 # === Session Management ===
 # Store active login sessions: user_id -> BrowserManager instance
 login_sessions: Dict[str, BrowserManager] = {}
+
+# Initialize AI Agent Manager
+auto_content_manager = AutoContentManager()
 
 class PublishRequest(BaseModel):
     user_id: str
@@ -325,3 +340,159 @@ async def close_session(
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+# === AI Agent Endpoints ===
+
+class AutoStartRequest(BaseModel):
+    userId: str
+    productName: str
+    targetAudience: str = "Target Audience"
+    marketingGoal: str = "brand"
+    postFrequency: str = "daily"
+    brandStyle: str = "warm"
+    reviewMode: str = "auto"
+
+@app.post("/agent/auto/start")
+async def start_auto_mode(
+    request: AutoStartRequest,
+    authorization: str = Header(None)
+):
+    if authorization != f"Bearer {WORKER_SECRET}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    await auto_content_manager.start_auto_mode(request.dict())
+    
+    return {
+        "success": True,
+        "message": f"Auto mode started for {request.productName}",
+        "data": {
+            "userId": request.userId,
+            "status": "generating",
+            "startTime": datetime.now().isoformat()
+        }
+    }
+
+@app.get("/agent/auto/status/{user_id}")
+async def get_auto_status(
+    user_id: str,
+    authorization: str = Header(None)
+):
+    if authorization != f"Bearer {WORKER_SECRET}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+        
+    status = auto_content_manager.get_status(user_id)
+    return {"status": status}
+
+@app.get("/agent/auto/strategy/{user_id}")
+async def get_auto_strategy(
+    user_id: str,
+    authorization: str = Header(None)
+):
+    if authorization != f"Bearer {WORKER_SECRET}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+        
+    strategy = auto_content_manager.get_strategy(user_id)
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+        
+    return {"success": True, "strategy": strategy}
+
+@app.get("/agent/auto/plan/{user_id}")
+async def get_auto_plan(
+    user_id: str,
+    authorization: str = Header(None)
+):
+    if authorization != f"Bearer {WORKER_SECRET}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+        
+    tasks = auto_content_manager.get_daily_tasks(user_id)
+    
+    # Format for frontend
+    formatted_tasks = []
+    for i, task in enumerate(tasks):
+        formatted_tasks.append({
+            "id": str(i + 1),
+            "title": task["title"],
+            "scheduledTime": task["scheduledTime"],
+            "status": task["status"],
+            "type": task["contentType"],
+            "content": task["content"],
+            "image_urls": task["imageUrls"],
+            "hashtags": task["hashtags"]
+        })
+        
+    return {
+        "success": True, 
+        "plan": {
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "tasks": formatted_tasks
+        }
+    }
+
+class ApproveRequest(BaseModel):
+    taskId: str
+
+@app.post("/agent/auto/approve/{user_id}")
+async def approve_task(
+    user_id: str,
+    request: ApproveRequest,
+    background_tasks: BackgroundTasks,
+    authorization: str = Header(None)
+):
+    if authorization != f"Bearer {WORKER_SECRET}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # Find the task
+    tasks = auto_content_manager.get_daily_tasks(user_id)
+    task_to_publish = None
+    
+    # Simple matching by title or ID (assuming ID is index+1)
+    try:
+        idx = int(request.taskId) - 1
+        if 0 <= idx < len(tasks):
+            task_to_publish = tasks[idx]
+    except:
+        pass
+        
+    if not task_to_publish:
+        # Try matching by title
+        for task in tasks:
+            if task["title"] == request.taskId:
+                task_to_publish = task
+                break
+    
+    if not task_to_publish:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Trigger publishing
+    # We need cookies for this user. 
+    # In a real scenario, we should load them from the user's session file.
+    # For now, we'll assume the user is logged in and we can get cookies from the file system.
+    
+    user_dir = os.path.abspath(f"data/users/{user_id}")
+    cookie_path = f"{user_dir}/cookies.json"
+    
+    if not os.path.exists(cookie_path):
+        raise HTTPException(status_code=400, detail="User not logged in. Please login first.")
+        
+    with open(cookie_path, 'r') as f:
+        cookies = json.load(f)
+        
+    # Reuse the existing background_publisher logic
+    publish_req = PublishRequest(
+        user_id=user_id,
+        cookies=cookies,
+        publish_type="image", # AI generated content is usually images
+        files=task_to_publish["imageUrls"],
+        title=task_to_publish["title"],
+        desc=task_to_publish["content"] + "\n\n" + " ".join(task_to_publish["hashtags"])
+    )
+    
+    background_tasks.add_task(background_publisher, publish_req)
+    
+    return {
+        "success": True,
+        "message": "Task approved and queued for publishing",
+        "jobId": f"job-{int(datetime.now().timestamp())}"
+    }
+
