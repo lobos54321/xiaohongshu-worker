@@ -162,84 +162,106 @@ class BrowserManager:
     def get_login_qrcode(self, proxy_url: str = None, user_agent: str = None):
         """
         Start browser and return QR code image (base64)
-        Always shows a fresh QR code, regardless of any existing login state.
+        Uses creator.xiaohongshu.com which always requires login.
         """
         try:
-            # Clean ALL Chromium data storage locations (global config, cache, temp files)
+            # Clean ALL Chromium data storage locations
             clean_all_chromium_data(self.user_id)
             
-            # Clean ALL old user data directories to ensure fresh login
-            users_base_dir = os.path.dirname(self.user_data_dir)  # data/users/
+            # Clean ALL old user data directories
+            users_base_dir = os.path.dirname(self.user_data_dir)
             clean_all_user_data(users_base_dir, self.user_id)
             
             # Always clear data for a fresh login attempt
             page = self.start_browser(proxy_url, user_agent, clear_data=True)
             
-            # 1. Navigate to main site
-            print(f"[{self.user_id}] 🌐 Navigating to xiaohongshu.com...")
-            page.get('https://www.xiaohongshu.com', timeout=30)
-            page.wait.doc_loaded(timeout=10)
+            # 🔥 Navigate to creator platform - forces login redirect
+            print(f"[{self.user_id}] 🌐 Navigating to creator.xiaohongshu.com...")
+            page.get('https://creator.xiaohongshu.com', timeout=60)
+            time.sleep(3)  # Wait for redirect to complete
             
-            # 🔥 Removed "already logged in" check - always try to show a fresh QR code
-            # The server may recognize the user by IP/device, but we use cookies from database for posting
+            print(f"[{self.user_id}] 📍 Current URL: {page.url}")
             
-            # 2. Try to find login button
-            print(f"[{self.user_id}] 🔍 Looking for login button...")
-            login_btn = page.ele('text:登录', timeout=5)
-            if not login_btn:
-                login_btn = page.ele('css:.login-btn', timeout=3)
-            if not login_btn:
-                login_btn = page.ele('css:[class*="login"]', timeout=3)
+            # Wait for login page to load
+            page.wait.doc_loaded(timeout=15)
+            time.sleep(2)
             
-            # 3. If no login button found, the page might show logged-in state
-            # Try to find and click logout/user menu to force re-login
-            if not login_btn:
-                print(f"[{self.user_id}] ⚠️ No login button found, page might show logged-in state")
-                print(f"[{self.user_id}] 🔄 Attempting to logout first...")
-                
-                # Try to find user avatar or menu that leads to logout
-                user_menu = page.ele('css:[class*="user"], css:[class*="avatar"], css:[class*="header-user"]', timeout=3)
-                if user_menu:
-                    user_menu.click()
-                    time.sleep(1)
-                    
-                    # Look for logout option
-                    logout_btn = page.ele('text:退出登录', timeout=2) or page.ele('text:退出', timeout=2)
-                    if logout_btn:
-                        logout_btn.click()
-                        print(f"[{self.user_id}] ✅ Clicked logout, waiting for page reload...")
-                        time.sleep(3)
-                        page.refresh()
-                        page.wait.doc_loaded(timeout=10)
-                        
-                        # Now try to find login button again
-                        login_btn = page.ele('text:登录', timeout=5)
-                
-                # If still no login button, try navigating to login page directly
-                if not login_btn:
-                    print(f"[{self.user_id}] 🔄 Navigating to login page directly...")
-                    page.get('https://www.xiaohongshu.com/login', timeout=30)
-                    page.wait.doc_loaded(timeout=10)
+            # 🔥 Key step: Switch to QR code login mode
+            # Default is SMS login, need to click the QR icon in top-right corner
+            print(f"[{self.user_id}] 🔍 Looking for QR code switch button...")
             
-            # 4. Click login button if found
-            if login_btn:
-                print(f"[{self.user_id}] 🖱️ Clicking login button...")
-                login_btn.click()
-                # Wait for modal to appear - try dynamic wait first, then fallback to sleep
-                modal = page.ele('css:[class*="modal"], css:[class*="dialog"], css:[class*="login-container"]', timeout=3)
-                if not modal:
-                    time.sleep(2)  # Fallback wait for modal to appear
+            # Strategy 1: Find QR code icon via CSS selectors
+            qr_switch_selectors = [
+                'css:[class*="qrcode"]',
+                'css:[class*="qr-code"]',
+                'css:[class*="scan"]',
+                'css:.login-container svg',
+                'css:.login-box svg',
+                'css:[class*="login"] svg',
+                'css:[class*="icon-qr"]',
+                'css:[class*="switch"]',
+            ]
             
-            # 5. Wait for QR code to render - try to detect canvas/img first
+            qr_switch_clicked = False
+            for selector in qr_switch_selectors:
+                try:
+                    qr_switch = page.ele(selector, timeout=2)
+                    if qr_switch:
+                        print(f"[{self.user_id}] 🖱️ Found QR switch with selector: {selector}")
+                        qr_switch.click()
+                        qr_switch_clicked = True
+                        time.sleep(2)
+                        break
+                except Exception:
+                    continue
+            
+            # Strategy 2: Try coordinate click on top-right corner
+            if not qr_switch_clicked:
+                print(f"[{self.user_id}] 🔍 Trying to find login container for coordinate click...")
+                login_container = page.ele('css:[class*="login-container"], css:[class*="login-box"], css:[class*="modal"]', timeout=3)
+                if login_container:
+                    try:
+                        # Get login box position and size
+                        rect = login_container.rect
+                        if hasattr(rect, 'x') and hasattr(rect, 'width'):
+                            # Click top-right corner (x + width - 30, y + 30)
+                            click_x = rect.x + rect.width - 30
+                            click_y = rect.y + 30
+                            print(f"[{self.user_id}] 🖱️ Clicking top-right corner at ({click_x}, {click_y})")
+                            page.run_js(f'''
+                                var elem = document.elementFromPoint({click_x}, {click_y});
+                                if (elem && typeof elem.click === 'function') elem.click();
+                            ''')
+                            qr_switch_clicked = True
+                            time.sleep(2)
+                    except Exception as e:
+                        print(f"[{self.user_id}] ⚠️ Coordinate click failed: {e}")
+            
+            # Strategy 3: Find element with "扫码" text
+            if not qr_switch_clicked:
+                try:
+                    scan_text = page.ele('text:扫码登录', timeout=2) or page.ele('text:扫码', timeout=2)
+                    if scan_text:
+                        print(f"[{self.user_id}] 🖱️ Found '扫码登录' text, clicking...")
+                        scan_text.click()
+                        qr_switch_clicked = True
+                        time.sleep(2)
+                except Exception:
+                    pass
+            
+            if qr_switch_clicked:
+                print(f"[{self.user_id}] ✅ Switched to QR code login mode")
+            else:
+                print(f"[{self.user_id}] ⚠️ Could not find QR switch, might already be in QR mode")
+            
+            # Wait for QR code to render
             print(f"[{self.user_id}] ⏳ Waiting for QR code to render...")
-            qr_element = page.ele('tag:canvas', timeout=3) or page.ele('tag:img[src*="base64"]', timeout=2)
-            if not qr_element:
-                time.sleep(2)  # Fallback wait for QR to render
+            time.sleep(3)
             
-            # 6. Detect QR code
+            # Detect and screenshot QR code
             qr_box = None
             
-            # Strategy 1: canvas element
+            # Strategy 1: Find canvas element
             canvases = page.eles('tag:canvas')
             for canvas in canvases:
                 if self._is_valid_qr_size(canvas):
@@ -247,23 +269,25 @@ class BrowserManager:
                     print(f"[{self.user_id}] ✅ Found QR in canvas")
                     break
             
-            # Strategy 2: img with base64 src
+            # Strategy 2: Find base64 image
             if not qr_box:
                 imgs = page.eles('tag:img')
                 for img in imgs:
                     src = img.attr('src') or ''
                     if 'data:image' in src and 'base64' in src:
                         if self._is_valid_qr_size(img):
-                            qr_box = img
                             print(f"[{self.user_id}] ✅ Found QR in img (base64)")
-                            # Directly return base64 data
                             try:
-                                base64_str = src.split('base64,')[1]
-                                return {"status": "waiting_scan", "qr_image": base64_str}
-                            except Exception:
-                                break
+                                parts = src.split('base64,')
+                                if len(parts) > 1:
+                                    base64_str = parts[1]
+                                    return {"status": "waiting_scan", "qr_image": base64_str}
+                            except (IndexError, ValueError):
+                                pass
+                            qr_box = img
+                            break
             
-            # Strategy 3: div with qr class
+            # Strategy 3: Find qrcode related class
             if not qr_box:
                 qr_divs = page.eles('css:[class*="qrcode"], css:[class*="qr-"]')
                 for div in qr_divs:
@@ -276,9 +300,9 @@ class BrowserManager:
                 base64_str = qr_box.get_screenshot(as_base64=True)
                 return {"status": "waiting_scan", "qr_image": base64_str}
             else:
-                # Fallback: capture login modal area
-                print(f"[{self.user_id}] ⚠️ QR not found, capturing login modal...")
-                modal = page.ele('css:[class*="modal"], css:[class*="dialog"], css:[class*="login-container"]', timeout=2)
+                # Fallback: capture entire login area
+                print(f"[{self.user_id}] ⚠️ QR not found, capturing login area...")
+                modal = page.ele('css:[class*="modal"], css:[class*="dialog"], css:[class*="login"]', timeout=2)
                 if modal:
                     base64_str = modal.get_screenshot(as_base64=True)
                 else:
@@ -287,7 +311,7 @@ class BrowserManager:
                 
         except Exception as e:
             print(f"[{self.user_id}] ❌ Error getting QR: {e}")
-            # Emergency fallback
+            # Emergency fallback: return page screenshot
             if self.page:
                 try:
                     base64_str = self.page.get_screenshot(as_base64=True)
