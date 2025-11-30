@@ -11,8 +11,11 @@ const handleRequest = async (request, sendResponse) => {
       const cookies = await chrome.cookies.getAll({ domain: "xiaohongshu.com" });
       const ua = navigator.userAgent;
 
-      if (cookies.length === 0) {
-        sendResponse({ success: false, msg: "未检测到小红书登录状态，请先在浏览器中登录小红书" });
+      // 检查关键的登录 Cookie (web_session)
+      const sessionCookie = cookies.find(c => c.name === "web_session");
+
+      if (!sessionCookie) {
+        sendResponse({ success: false, msg: "检测到未登录状态！请先在小红书官网登录账号。" });
         return;
       }
 
