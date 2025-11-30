@@ -8,6 +8,7 @@ from .utils import download_video, clean_all_user_data, clean_all_chromium_data
 # Constants for QR code icon detection
 QR_ICON_MIN_X_POSITION = 300  # Minimum X position for QR icon (right side of login box)
 LOGIN_BOX_CORNER_OFFSET = 40  # Offset from corner for coordinate-based clicking
+QR_MIN_SIZE = 80  # Minimum size for valid QR code element
 
 # Stealth JavaScript to bypass browser detection
 STEALTH_JS = """
@@ -162,7 +163,7 @@ class BrowserManager:
             print(f"[{self.user_id}] ⚠️ Failed to get cookies: {e}")
             return {}
 
-    def _is_valid_qr_size(self, element, min_size=80):
+    def _is_valid_qr_size(self, element, min_size=QR_MIN_SIZE):
         """Check if element is large enough (likely a QR code)"""
         try:
             rect = element.rect
@@ -215,15 +216,15 @@ class BrowserManager:
         
         # Strategy 1: JavaScript click on right-side SVG icon
         try:
-            result = self.page.run_js('''
+            result = self.page.run_js(f'''
                 var svgs = document.querySelectorAll('svg');
-                for (var i = 0; i < svgs.length; i++) {
+                for (var i = 0; i < svgs.length; i++) {{
                     var rect = svgs[i].getBoundingClientRect();
-                    if (rect.x > 300 && rect.width > 10 && rect.width < 50) {
+                    if (rect.x > {QR_ICON_MIN_X_POSITION} && rect.width > 10 && rect.width < 50) {{
                         svgs[i].click();
                         return 'clicked';
-                    }
-                }
+                    }}
+                }}
                 return 'not_found';
             ''')
             if result == 'clicked':
@@ -380,18 +381,18 @@ class BrowserManager:
         
         # Strategy 4: JavaScript to extract canvas data
         try:
-            result = self.page.run_js('''
+            result = self.page.run_js(f'''
                 var canvases = document.querySelectorAll('canvas');
-                for (var i = 0; i < canvases.length; i++) {
+                for (var i = 0; i < canvases.length; i++) {{
                     var canvas = canvases[i];
-                    if (canvas.width > 80 && canvas.height > 80) {
-                        try {
+                    if (canvas.width > {QR_MIN_SIZE} && canvas.height > {QR_MIN_SIZE}) {{
+                        try {{
                             return canvas.toDataURL('image/png').split('base64,')[1];
-                        } catch (e) {
+                        }} catch (e) {{
                             continue;
-                        }
-                    }
-                }
+                        }}
+                    }}
+                }}
                 return null;
             ''')
             if result:

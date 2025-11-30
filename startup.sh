@@ -38,7 +38,13 @@ if kill -0 $XVFB_PID 2>/dev/null; then
 else
     echo "❌ Failed to start Xvfb, retrying..."
     Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
+    XVFB_PID=$!
     sleep 2
+    if kill -0 $XVFB_PID 2>/dev/null; then
+        echo "✅ Xvfb retry successful (PID: $XVFB_PID)"
+    else
+        echo "⚠️ Xvfb failed to start, continuing anyway..."
+    fi
 fi
 
 # Export DISPLAY environment variable
