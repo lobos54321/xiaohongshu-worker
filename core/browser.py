@@ -16,7 +16,7 @@ class BrowserManager:
         self.page = None
         self.display = None
 
-    def _get_options(self, proxy_url: str = None, user_agent: str = None):
+    def _get_options(self, proxy_url: str = None, user_agent: str = None, headless: bool = False):
         co = ChromiumOptions()
         
         import platform
@@ -25,11 +25,20 @@ class BrowserManager:
             co.set_argument('--no-sandbox')
             co.set_argument('--disable-gpu')
             co.set_argument('--disable-dev-shm-usage')
-            # co.headless(True)  # 禁用 headless 模式以绕过检测
-            co.headless(False)
+            co.set_argument('--disable-setuid-sandbox')  # 增加稳定性
+            co.set_argument('--no-zygote')               # 增加稳定性
+            
+            if headless:
+                co.set_argument('--headless=new')
+            else:
+                co.headless(False)
         else:
-            # co.set_argument('--headless=new')  # 禁用 headless 模式
-            pass
+            # Mac/Windows local dev
+            if headless:
+                co.set_argument('--headless=new')
+            else:
+                # co.headless(False) # Local dev default
+                pass
             
         if proxy_url:
             co.set_proxy(proxy_url)
@@ -55,7 +64,7 @@ class BrowserManager:
         return co
 
     def start_browser(self, proxy_url: str = None, user_agent: str = None, clear_data: bool = True):
-        """Initialize browser session"""
+        """Initialize browser session with fallback"""
         
         if clear_data:
             if self.page:
@@ -102,14 +111,28 @@ class BrowserManager:
             else:
                 print(f"[{self.user_id}] 🖥️ Using existing DISPLAY: {display_env}")
 
-        co = self._get_options(proxy_url, user_agent)
-        print(f"[{self.user_id}] 🚀 Starting new browser instance...")
-        self.page = ChromiumPage(co)
-        
-        self._inject_stealth_scripts()
-        
-        print(f"[{self.user_id}] ✅ Browser started successfully")
-        return self.page
+        # 尝试启动浏览器 - 首先尝试非 headless 模式 (更隐蔽)
+        try:
+            print(f"[{self.user_id}] 🚀 Starting new browser instance (Headless: False)...")
+            co = self._get_options(proxy_url, user_agent, headless=False)
+            self.page = ChromiumPage(co)
+            self._inject_stealth_scripts()
+            print(f"[{self.user_id}] ✅ Browser started successfully (Headless: False)")
+            return self.page
+        except Exception as e:
+            print(f"[{self.user_id}] ⚠️ Failed to start visible browser: {e}")
+            print(f"[{self.user_id}] 🔄 Falling back to headless mode...")
+            
+            # 失败回退到 headless 模式
+            try:
+                co = self._get_options(proxy_url, user_agent, headless=True)
+                self.page = ChromiumPage(co)
+                self._inject_stealth_scripts()
+                print(f"[{self.user_id}] ✅ Browser started successfully (Headless: True)")
+                return self.page
+            except Exception as e2:
+                print(f"[{self.user_id}] ❌ Failed to start browser in both modes: {e2}")
+                raise e2
 
     def _inject_stealth_scripts(self):
         """注入反检测脚本"""
