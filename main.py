@@ -149,7 +149,7 @@ async def get_login_qrcode(
                 request.proxy_url,
                 request.user_agent
             ),
-            timeout=45.0
+            timeout=90.0
         )
         print(f"[{request.user_id}] ✅ QR code request completed: {result.get('status')}")
     except asyncio.TimeoutError:
