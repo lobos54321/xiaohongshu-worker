@@ -133,14 +133,325 @@ class BrowserManager:
         except:
             return {}
 
+    def _debug_page_layout(self):
+        """
+        调试方法：输出页面布局信息
+        这是定位问题的关键！
+        """
+        try:
+            # 1. 获取视口尺寸
+            viewport = self.page.run_js("""
+                return {
+                    innerWidth: window.innerWidth,
+                    innerHeight: window.innerHeight,
+                    scrollWidth: document.body.scrollWidth,
+                    scrollHeight: document.body.scrollHeight
+                };
+            """)
+            print(f"[{self.user_id}] 📐 Viewport: {viewport}")
+            
+            # 2. 查找"短信登录"文字的位置
+            sms_info = self.page.run_js("""
+                (function() {
+                    var walker = document.createTreeWalker(
+                        document.body,
+                        NodeFilter.SHOW_TEXT,
+                        null,
+                        false
+                    );
+                    var node;
+                    while(node = walker.nextNode()) {
+                        if (node.textContent.includes('短信登录')) {
+                            var parent = node.parentElement;
+                            var rect = parent.getBoundingClientRect();
+                            return {
+                                found: true,
+                                text: '短信登录',
+                                x: Math.round(rect.x),
+                                y: Math.round(rect.y),
+                                width: Math.round(rect.width),
+                                height: Math.round(rect.height)
+                            };
+                        }
+                    }
+                    return {found: false};
+                })();
+            """)
+            print(f"[{self.user_id}] 📍 '短信登录' 位置: {sms_info}")
+            
+            # 3. 查找登录框容器
+            login_box = self.page.run_js("""
+                (function() {
+                    var walker = document.createTreeWalker(
+                        document.body,
+                        NodeFilter.SHOW_TEXT,
+                        null,
+                        false
+                    );
+                    var node;
+                    while(node = walker.nextNode()) {
+                        if (node.textContent.includes('短信登录')) {
+                            var parent = node.parentElement;
+                            // 向上查找直到找到足够大的容器
+                            for (var i = 0; i < 20 && parent; i++) {
+                                var rect = parent.getBoundingClientRect();
+                                if (rect.width > 300 && rect.height > 300 && rect.width < 800) {
+                                    return {
+                                        found: true,
+                                        x: Math.round(rect.x),
+                                        y: Math.round(rect.y),
+                                        width: Math.round(rect.width),
+                                        height: Math.round(rect.height),
+                                        tag: parent.tagName,
+                                        class: (parent.className || '').substring(0, 50)
+                                    };
+                                }
+                                parent = parent.parentElement;
+                            }
+                        }
+                    }
+                    return {found: false};
+                })();
+            """)
+            print(f"[{self.user_id}] 📦 登录框容器: {login_box}")
+            
+            # 4. 查找所有 SVG 的位置
+            svgs = self.page.run_js("""
+                (function() {
+                    var svgs = document.querySelectorAll('svg');
+                    var results = [];
+                    for (var i = 0; i < svgs.length; i++) {
+                        var rect = svgs[i].getBoundingClientRect();
+                        if (rect.width > 5 && rect.height > 5) {
+                            results.push({
+                                index: i,
+                                x: Math.round(rect.x),
+                                y: Math.round(rect.y),
+                                width: Math.round(rect.width),
+                                height: Math.round(rect.height)
+                            });
+                        }
+                    }
+                    return results;
+                })();
+            """)
+            print(f"[{self.user_id}] 🎨 SVG 元素列表:")
+            for svg in svgs:
+                print(f"[{self.user_id}]    SVG[{svg['index']}]: ({svg['x']}, {svg['y']}) {svg['width']}x{svg['height']}")
+            
+            return {
+                'viewport': viewport,
+                'sms_info': sms_info,
+                'login_box': login_box,
+                'svgs': svgs
+            }
+            
+        except Exception as e:
+            print(f"[{self.user_id}] ⚠️ Debug layout failed: {e}")
+            return None
+
+    def _find_qr_icon_position(self):
+        """
+        动态查找QR图标的正确位置
+        基于登录框位置计算，而不是硬编码坐标
+        """
+        try:
+            # 方法1: 基于登录框位置计算QR图标位置
+            result = self.page.run_js("""
+                (function() {
+                    // 查找包含"短信登录"的元素，然后向上找登录框
+                    var walker = document.createTreeWalker(
+                        document.body,
+                        NodeFilter.SHOW_TEXT,
+                        null,
+                        false
+                    );
+                    var node;
+                    var loginBox = null;
+                    
+                    while(node = walker.nextNode()) {
+                        if (node.textContent.includes('短信登录')) {
+                            var parent = node.parentElement;
+                            for (var i = 0; i < 20 && parent; i++) {
+                                var rect = parent.getBoundingClientRect();
+                                // 登录框特征：宽度300-600，高度300-600
+                                if (rect.width > 300 && rect.width < 700 && 
+                                    rect.height > 300 && rect.height < 700) {
+                                    loginBox = parent;
+                                    break;
+                                }
+                                parent = parent.parentElement;
+                            }
+                            break;
+                        }
+                    }
+                    
+                    if (!loginBox) {
+                        return {found: false, reason: 'login_box_not_found'};
+                    }
+                    
+                    var boxRect = loginBox.getBoundingClientRect();
+                    
+                    // QR图标在登录框右上角
+                    // 计算右上角位置（向内偏移20-40像素）
+                    var qrIconX = boxRect.right - 30;
+                    var qrIconY = boxRect.top + 30;
+                    
+                    return {
+                        found: true,
+                        loginBox: {
+                            x: Math.round(boxRect.x),
+                            y: Math.round(boxRect.y),
+                            width: Math.round(boxRect.width),
+                            height: Math.round(boxRect.height),
+                            right: Math.round(boxRect.right),
+                            bottom: Math.round(boxRect.bottom)
+                        },
+                        qrIconPosition: {
+                            x: Math.round(qrIconX),
+                            y: Math.round(qrIconY)
+                        }
+                    };
+                })();
+            """)
+            
+            print(f"[{self.user_id}] 🎯 QR图标位置计算结果: {result}")
+            return result
+            
+        except Exception as e:
+            print(f"[{self.user_id}] ⚠️ Find QR icon position failed: {e}")
+            return None
+
+    def _click_at_position(self, x, y):
+        """在指定位置点击"""
+        try:
+            result = self.page.run_js(f"""
+                (function() {{
+                    var elem = document.elementFromPoint({x}, {y});
+                    if (elem) {{
+                        // 创建并派发点击事件
+                        var event = new MouseEvent('click', {{
+                            bubbles: true,
+                            cancelable: true,
+                            view: window,
+                            clientX: {x},
+                            clientY: {y}
+                        }});
+                        elem.dispatchEvent(event);
+                        
+                        return {{
+                            clicked: true,
+                            element: elem.tagName,
+                            class: (elem.className || '').substring(0, 50)
+                        }};
+                    }}
+                    return {{clicked: false, reason: 'no_element_at_position'}};
+                }})();
+            """)
+            print(f"[{self.user_id}] 🖱️ Click at ({x}, {y}): {result}")
+            return result
+        except Exception as e:
+            print(f"[{self.user_id}] ⚠️ Click failed: {e}")
+            return None
+
+    def _is_qr_mode(self):
+        """检查是否已切换到QR码模式"""
+        try:
+            # 检查是否有 canvas（QR码用canvas渲染）
+            result = self.page.run_js("""
+                (function() {
+                    var canvases = document.querySelectorAll('canvas');
+                    for (var canvas of canvases) {
+                        if (canvas.width > 100 && canvas.height > 100) {
+                            var rect = canvas.getBoundingClientRect();
+                            return {
+                                found: true,
+                                x: Math.round(rect.x),
+                                y: Math.round(rect.y),
+                                width: canvas.width,
+                                height: canvas.height
+                            };
+                        }
+                    }
+                    return {found: false};
+                })();
+            """)
+            
+            if result and result.get('found'):
+                print(f"[{self.user_id}] ✅ QR mode detected: canvas at {result}")
+                return True
+            
+            # 检查是否有扫码相关文字
+            has_scan_text = self.page.ele('text:打开小红书', timeout=1) or \
+                           self.page.ele('text:扫一扫', timeout=1) or \
+                           self.page.ele('text:扫码登录', timeout=1)
+            
+            if has_scan_text:
+                print(f"[{self.user_id}] ✅ QR mode detected: found scan text")
+                return True
+                
+            return False
+        except:
+            return False
+
+    def _capture_qr_code(self):
+        """捕获QR码图片"""
+        try:
+            # 方法1: 从 canvas 获取
+            qr_data = self.page.run_js("""
+                (function() {
+                    var canvases = document.querySelectorAll('canvas');
+                    for (var canvas of canvases) {
+                        if (canvas.width > 100 && canvas.height > 100) {
+                            try {
+                                return canvas.toDataURL('image/png').split('base64,')[1];
+                            } catch(e) {
+                                // canvas可能被污染
+                            }
+                        }
+                    }
+                    return null;
+                })();
+            """)
+            
+            if qr_data:
+                print(f"[{self.user_id}] ✅ Captured QR from canvas via JS")
+                return qr_data
+            
+            # 方法2: 截取 canvas 元素
+            canvases = self.page.eles('tag:canvas')
+            for canvas in canvases:
+                try:
+                    size = canvas.rect.size
+                    if size[0] > 100 and size[1] > 100:
+                        qr_data = canvas.get_screenshot(as_base64=True)
+                        if qr_data:
+                            print(f"[{self.user_id}] ✅ Captured QR from canvas element")
+                            return qr_data
+                except Exception as e:
+                    print(f"[{self.user_id}] ⚠️ Canvas capture failed: {e}")
+            
+            # 方法3: 查找 base64 图片
+            imgs = self.page.eles('tag:img')
+            for img in imgs:
+                try:
+                    src = img.attr('src') or ''
+                    if 'base64' in src:
+                        size = img.rect.size
+                        if size[0] > 80 and size[1] > 80:
+                            return src.split('base64,')[1]
+                except:
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            print(f"[{self.user_id}] ⚠️ Capture QR failed: {e}")
+            return None
+
     def get_login_qrcode(self, proxy_url: str = None, user_agent: str = None):
         """
         获取登录二维码
-        
-        核心策略变更：
-        1. 先尝试访问页面
-        2. 使用JavaScript强制切换到扫码模式
-        3. 等待并捕获QR码
         """
         try:
             clean_all_chromium_data(self.user_id)
@@ -155,223 +466,80 @@ class BrowserManager:
             
             print(f"[{self.user_id}] ⏳ Waiting for page to load...")
             page.wait.doc_loaded(timeout=30)
-            time.sleep(3)
+            time.sleep(3)  # 等待 JS 渲染
             
             self._inject_stealth_scripts()
             
             print(f"[{self.user_id}] 📍 Current URL: {page.url}")
             
-            # ========== 关键步骤：强制切换到扫码模式 ==========
-            print(f"[{self.user_id}] 🔄 Attempting to switch to QR mode...")
+            # ========== 关键步骤：调试页面布局 ==========
+            print(f"[{self.user_id}] 🔍 Analyzing page layout...")
+            layout_info = self._debug_page_layout()
             
-            # 策略：遍历所有可能的点击目标
-            switch_success = False
+            # ========== 动态计算QR图标位置 ==========
+            print(f"[{self.user_id}] 🎯 Finding QR icon position...")
+            qr_position = self._find_qr_icon_position()
             
-            # 方法1: 使用 DrissionPage 查找并点击 SVG
-            try:
-                # 获取所有页面元素的详细信息
-                all_info = page.run_js("""
-                    (function() {
-                        var info = [];
-                        var all = document.querySelectorAll('*');
-                        for (var i = 0; i < all.length; i++) {
-                            var el = all[i];
-                            var rect = el.getBoundingClientRect();
-                            if (rect.x > 450 && rect.y < 250 && rect.width > 10 && rect.width < 80) {
-                                info.push({
-                                    tag: el.tagName,
-                                    class: el.className,
-                                    x: rect.x,
-                                    y: rect.y,
-                                    w: rect.width,
-                                    h: rect.height
-                                });
-                            }
-                        }
-                        return info;
-                    })();
-                """)
-                print(f"[{self.user_id}] 📊 Found {len(all_info) if all_info else 0} potential click targets in top-right")
-                if all_info:
-                    for item in all_info[:5]:
-                        print(f"[{self.user_id}]    - {item}")
-            except Exception as e:
-                print(f"[{self.user_id}] ⚠️ Element scan failed: {e}")
-            
-            # 方法2: 直接用坐标点击
-            try:
-                # 点击右上角区域的多个位置
-                click_positions = [
-                    (550, 180), (560, 190), (540, 170),
-                    (570, 200), (530, 160), (580, 210)
-                ]
+            if not qr_position or not qr_position.get('found'):
+                print(f"[{self.user_id}] ❌ Could not find login box, trying fallback...")
+                # 备选方案：基于视口尺寸估算
+                viewport = layout_info.get('viewport', {}) if layout_info else {}
+                width = viewport.get('innerWidth', 1920)
                 
-                for x, y in click_positions:
-                    print(f"[{self.user_id}] 🖱️ Clicking at ({x}, {y})...")
+                # 假设登录框在右侧 40% 区域
+                # 登录框宽度约 400px，右边距约 100px
+                estimated_x = width - 100 - 30  # 右边距-图标偏移
+                estimated_y = 200  # 假设距顶部 200px
+                
+                print(f"[{self.user_id}] 📐 Using estimated position: ({estimated_x}, {estimated_y})")
+                qr_position = {
+                    'found': True,
+                    'qrIconPosition': {'x': estimated_x, 'y': estimated_y}
+                }
+            
+            # ========== 点击QR图标 ==========
+            if qr_position and qr_position.get('found'):
+                click_x = qr_position['qrIconPosition']['x']
+                click_y = qr_position['qrIconPosition']['y']
+                
+                print(f"[{self.user_id}] 🖱️ Clicking QR icon at ({click_x}, {click_y})...")
+                
+                # 尝试多个偏移位置
+                offsets = [(0, 0), (-10, 0), (10, 0), (0, -10), (0, 10)]
+                
+                for dx, dy in offsets:
+                    self._click_at_position(click_x + dx, click_y + dy)
+                    time.sleep(0.5)
                     
-                    # 使用 JavaScript 点击
-                    page.run_js(f"""
-                        (function() {{
-                            var elem = document.elementFromPoint({x}, {y});
-                            if (elem) {{
-                                console.log('Clicking:', elem.tagName, elem.className);
-                                elem.click();
-                                
-                                // 也尝试触发 MouseEvent
-                                var event = new MouseEvent('click', {{
-                                    bubbles: true,
-                                    cancelable: true,
-                                    view: window,
-                                    clientX: {x},
-                                    clientY: {y}
-                                }});
-                                elem.dispatchEvent(event);
-                            }}
-                        }})();
-                    """)
-                    
-                    time.sleep(1)
-                    
-                    # 检查是否有 canvas 出现
-                    canvases = page.eles('tag:canvas')
-                    for canvas in canvases:
-                        try:
-                            size = canvas.rect.size
-                            if size[0] > 100 and size[1] > 100:
-                                print(f"[{self.user_id}] ✅ Found QR canvas after clicking ({x}, {y})")
-                                switch_success = True
-                                break
-                        except:
-                            continue
-                    
-                    if switch_success:
+                    # 检查是否成功切换
+                    if self._is_qr_mode():
+                        print(f"[{self.user_id}] ✅ Successfully switched to QR mode!")
                         break
-                        
-            except Exception as e:
-                print(f"[{self.user_id}] ⚠️ Position click failed: {e}")
             
-            # 方法3: 查找并点击包含特定属性的元素
-            if not switch_success:
-                try:
-                    # 查找所有可能是切换按钮的元素
-                    js_find_and_click = """
-                    (function() {
-                        // 查找右上角的可点击元素
-                        var elements = document.querySelectorAll('svg, img, div, span, button, a');
-                        for (var el of elements) {
-                            var rect = el.getBoundingClientRect();
-                            // 在登录框右上角区域
-                            if (rect.x > 450 && rect.x < 650 && rect.y > 100 && rect.y < 300) {
-                                if (rect.width > 10 && rect.width < 80 && rect.height > 10 && rect.height < 80) {
-                                    el.click();
-                                    return 'clicked: ' + el.tagName + ' at ' + rect.x + ',' + rect.y;
-                                }
-                            }
-                        }
-                        return 'no element found';
-                    })();
-                    """
-                    result = page.run_js(js_find_and_click)
-                    print(f"[{self.user_id}] 📍 Method 3 result: {result}")
-                    time.sleep(2)
-                    
-                    # 再次检查 canvas
-                    canvases = page.eles('tag:canvas')
-                    for canvas in canvases:
-                        try:
-                            size = canvas.rect.size
-                            if size[0] > 100 and size[1] > 100:
-                                switch_success = True
-                                break
-                        except:
-                            continue
-                except Exception as e:
-                    print(f"[{self.user_id}] ⚠️ Method 3 failed: {e}")
-            
-            # 等待QR码渲染
-            if switch_success:
-                print(f"[{self.user_id}] ✅ Successfully switched to QR mode")
-            else:
-                print(f"[{self.user_id}] ⚠️ Could not confirm QR mode switch")
-            
-            print(f"[{self.user_id}] ⏳ Waiting for QR code to render...")
-            time.sleep(3)
+            # ========== 等待QR码渲染 ==========
+            time.sleep(2)
             
             # ========== 捕获QR码 ==========
-            qr_image = None
+            if self._is_qr_mode():
+                qr_image = self._capture_qr_code()
+                if qr_image:
+                    print(f"[{self.user_id}] ✅ QR code captured successfully")
+                    return {"status": "waiting_scan", "qr_image": qr_image}
             
-            # 策略1: 从 canvas 获取
-            try:
-                canvases = page.eles('tag:canvas')
-                print(f"[{self.user_id}] 🔍 Found {len(canvases)} canvas elements")
-                
-                for i, canvas in enumerate(canvases):
-                    try:
-                        size = canvas.rect.size
-                        print(f"[{self.user_id}]    Canvas {i}: size={size}")
-                        
-                        if size[0] > 100 and size[1] > 100:
-                            # 尝试直接截图
-                            qr_image = canvas.get_screenshot(as_base64=True)
-                            if qr_image:
-                                print(f"[{self.user_id}] ✅ Captured QR from canvas {i}")
-                                break
-                    except Exception as e:
-                        print(f"[{self.user_id}] ⚠️ Canvas {i} capture failed: {e}")
-                        continue
-            except Exception as e:
-                print(f"[{self.user_id}] ⚠️ Canvas strategy failed: {e}")
+            # 备选：返回全页面截图
+            print(f"[{self.user_id}] ⚠️ QR not found, returning full page screenshot")
             
-            # 策略2: 使用 JS 提取 canvas 数据
-            if not qr_image:
-                try:
-                    qr_image = page.run_js("""
-                        (function() {
-                            var canvases = document.querySelectorAll('canvas');
-                            for (var canvas of canvases) {
-                                if (canvas.width > 100 && canvas.height > 100) {
-                                    try {
-                                        return canvas.toDataURL('image/png').split('base64,')[1];
-                                    } catch(e) {}
-                                }
-                            }
-                            return null;
-                        })();
-                    """)
-                    if qr_image:
-                        print(f"[{self.user_id}] ✅ Captured QR via JS extraction")
-                except Exception as e:
-                    print(f"[{self.user_id}] ⚠️ JS extraction failed: {e}")
-            
-            # 策略3: 查找 base64 图片
-            if not qr_image:
-                try:
-                    imgs = page.eles('tag:img')
-                    for img in imgs:
-                        src = img.attr('src') or ''
-                        if 'base64' in src:
-                            try:
-                                size = img.rect.size
-                                if size[0] > 80 and size[1] > 80:
-                                    qr_image = src.split('base64,')[1]
-                                    print(f"[{self.user_id}] ✅ Found QR in base64 img")
-                                    break
-                            except:
-                                continue
-                except Exception as e:
-                    print(f"[{self.user_id}] ⚠️ Base64 img search failed: {e}")
-            
-            # 返回结果
-            if qr_image:
-                return {"status": "waiting_scan", "qr_image": qr_image}
-            else:
-                print(f"[{self.user_id}] ⚠️ QR not found, returning full page screenshot")
-                base64_str = page.get_screenshot(as_base64=True)
-                return {
-                    "status": "waiting_scan",
-                    "qr_image": base64_str,
-                    "note": "full_page_fallback"
+            # 截取视口（而不是整个页面）
+            base64_str = page.get_screenshot(as_base64=True, full_page=False)
+            return {
+                "status": "waiting_scan",
+                "qr_image": base64_str,
+                "note": "full_page_fallback",
+                "debug_info": {
+                    "layout": layout_info,
+                    "qr_position": qr_position
                 }
+            }
                 
         except Exception as e:
             print(f"[{self.user_id}] ❌ Error getting QR: {e}")
