@@ -15,7 +15,7 @@ const handleRequest = async (request, sendResponse) => {
       const sessionCookie = cookies.find(c => c.name === "web_session");
 
       if (!sessionCookie) {
-        sendResponse({ success: false, msg: "检测到未登录状态！请先在 <a href='https://creator.xiaohongshu.com/login' target='_blank'>小红书创作平台</a> 登录账号。" });
+        sendResponse({ success: false, msg: "检测到未登录状态！请登录小红书创作平台：https://creator.xiaohongshu.com/login" });
         return;
       }
 
