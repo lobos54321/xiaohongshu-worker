@@ -3,7 +3,7 @@ import time
 import shutil
 from DrissionPage import ChromiumPage, ChromiumOptions
 from pyvirtualdisplay import Display
-from .utils import download_video, clean_all_user_data
+from .utils import download_video, clean_all_user_data, clean_all_chromium_data
 
 class BrowserManager:
     """Manage Chromium browser instances for XHS operations"""
@@ -59,6 +59,19 @@ class BrowserManager:
         co.set_argument('--disable-translate')
         co.set_argument('--no-first-run')
         co.set_argument('--disable-features=TranslateUI')
+        
+        # Use incognito mode to completely avoid reading/saving any cookies
+        co.set_argument('--incognito')
+        
+        # Disable all caches
+        co.set_argument('--disable-application-cache')
+        co.set_argument('--disable-cache')
+        co.set_argument('--disk-cache-size=0')
+        co.set_argument('--media-cache-size=0')
+        
+        # Disable local storage
+        co.set_argument('--disable-local-storage')
+        co.set_argument('--disable-session-crashed-bubble')
         
         return co
 
@@ -152,6 +165,9 @@ class BrowserManager:
         Uses www.xiaohongshu.com main site which shows QR code by default in login modal
         """
         try:
+            # Clean ALL Chromium data storage locations (global config, cache, temp files)
+            clean_all_chromium_data(self.user_id)
+            
             # Clean ALL old user data directories to ensure fresh login
             users_base_dir = os.path.dirname(self.user_data_dir)  # data/users/
             clean_all_user_data(users_base_dir, self.user_id)

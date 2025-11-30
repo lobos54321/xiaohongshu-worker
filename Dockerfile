@@ -35,6 +35,9 @@ COPY . .
 # 5. Create data directory for persistence
 RUN mkdir -p /app/data/users && chmod -R 777 /app/data
 
-# 6. Start service
-# Use shell form to run Xvfb and Uvicorn simultaneously
-CMD ["sh", "-c", "Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 & uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1"]
+# 6. Copy startup script and make it executable
+COPY startup.sh /app/startup.sh
+RUN chmod +x /app/startup.sh
+
+# 7. Start service using startup script
+CMD ["/app/startup.sh"]
