@@ -162,7 +162,7 @@ class BrowserManager:
     def get_login_qrcode(self, proxy_url: str = None, user_agent: str = None):
         """
         Start browser and return QR code image (base64)
-        Uses www.xiaohongshu.com main site which shows QR code by default in login modal
+        Always shows a fresh QR code, regardless of any existing login state.
         """
         try:
             # Clean ALL Chromium data storage locations (global config, cache, temp files)
@@ -180,12 +180,10 @@ class BrowserManager:
             page.get('https://www.xiaohongshu.com', timeout=30)
             page.wait.doc_loaded(timeout=10)
             
-            # 2. Check if already logged in
-            cookies_dict = self._get_cookies_dict()
-            if 'web_session' in cookies_dict or 'a1' in cookies_dict:
-                return {"status": "logged_in", "msg": "Already logged in"}
+            # 🔥 Removed "already logged in" check - always try to show a fresh QR code
+            # The server may recognize the user by IP/device, but we use cookies from database for posting
             
-            # 3. Find and click login button
+            # 2. Try to find login button
             print(f"[{self.user_id}] 🔍 Looking for login button...")
             login_btn = page.ele('text:登录', timeout=5)
             if not login_btn:
@@ -193,6 +191,37 @@ class BrowserManager:
             if not login_btn:
                 login_btn = page.ele('css:[class*="login"]', timeout=3)
             
+            # 3. If no login button found, the page might show logged-in state
+            # Try to find and click logout/user menu to force re-login
+            if not login_btn:
+                print(f"[{self.user_id}] ⚠️ No login button found, page might show logged-in state")
+                print(f"[{self.user_id}] 🔄 Attempting to logout first...")
+                
+                # Try to find user avatar or menu that leads to logout
+                user_menu = page.ele('css:[class*="user"], css:[class*="avatar"], css:[class*="header-user"]', timeout=3)
+                if user_menu:
+                    user_menu.click()
+                    time.sleep(1)
+                    
+                    # Look for logout option
+                    logout_btn = page.ele('text:退出登录', timeout=2) or page.ele('text:退出', timeout=2)
+                    if logout_btn:
+                        logout_btn.click()
+                        print(f"[{self.user_id}] ✅ Clicked logout, waiting for page reload...")
+                        time.sleep(3)
+                        page.refresh()
+                        page.wait.doc_loaded(timeout=10)
+                        
+                        # Now try to find login button again
+                        login_btn = page.ele('text:登录', timeout=5)
+                
+                # If still no login button, try navigating to login page directly
+                if not login_btn:
+                    print(f"[{self.user_id}] 🔄 Navigating to login page directly...")
+                    page.get('https://www.xiaohongshu.com/login', timeout=30)
+                    page.wait.doc_loaded(timeout=10)
+            
+            # 4. Click login button if found
             if login_btn:
                 print(f"[{self.user_id}] 🖱️ Clicking login button...")
                 login_btn.click()
@@ -201,13 +230,13 @@ class BrowserManager:
                 if not modal:
                     time.sleep(2)  # Fallback wait for modal to appear
             
-            # 4. Wait for QR code to render - try to detect canvas/img first
+            # 5. Wait for QR code to render - try to detect canvas/img first
             print(f"[{self.user_id}] ⏳ Waiting for QR code to render...")
             qr_element = page.ele('tag:canvas', timeout=3) or page.ele('tag:img[src*="base64"]', timeout=2)
             if not qr_element:
                 time.sleep(2)  # Fallback wait for QR to render
             
-            # 5. Detect QR code
+            # 6. Detect QR code
             qr_box = None
             
             # Strategy 1: canvas element
