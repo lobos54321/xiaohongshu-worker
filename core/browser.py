@@ -107,6 +107,7 @@ class BrowserManager:
                     pass
                 self.display = Display(visible=0, size=(1920, 1080))
                 self.display.start()
+                time.sleep(1)  # 等待 Xvfb 完全启动
                 print(f"[{self.user_id}] 🖥️ Started virtual display")
             else:
                 print(f"[{self.user_id}] 🖥️ Using existing DISPLAY: {display_env}")
@@ -628,15 +629,24 @@ class BrowserManager:
         try:
             cookies_dict = self._get_cookies_dict()
             
-            if 'web_session' in cookies_dict or 'a1' in cookies_dict:
-                print(f"[{self.user_id}] 🍪 Found login cookies!")
+            # 只有 web_session 才是真正的登录凭证，a1 只是设备指纹
+            if 'web_session' in cookies_dict:
+                print(f"[{self.user_id}] 🍪 Found web_session cookie!")
+                return True
+                
+            # 如果只有 a1，尝试验证是否真的登录了
+            if 'a1' in cookies_dict:
                 try:
-                    self.page.get("https://creator.xiaohongshu.com/creator/home", timeout=15)
+                    # 只有在当前不在 creator 页面时才跳转，避免刷新页面
+                    if "creator" not in self.page.url:
+                        self.page.get("https://creator.xiaohongshu.com/creator/home", timeout=15)
+                    
                     if "creator" in self.page.url and "login" not in self.page.url:
+                        print(f"[{self.user_id}] ✅ Verified login via URL check")
                         return True
                 except:
                     pass
-                return True
+                # 如果跳转失败或 URL 不对，说明只有 a1 但没登录
             
             if "creator/home" in self.page.url:
                 return True
