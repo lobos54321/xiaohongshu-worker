@@ -138,7 +138,7 @@ async def get_login_qrcode(
     manager = BrowserManager(request.user_id)
     login_sessions[request.user_id] = manager
     
-    # Run synchronous browser op in thread pool with timeout
+    # Run synchronous browser op in thread pool
     loop = asyncio.get_running_loop()
     try:
         print(f"[{request.user_id}] 🚀 Requesting QR code...")

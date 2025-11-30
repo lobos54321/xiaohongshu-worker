@@ -25,9 +25,11 @@ class BrowserManager:
             co.set_argument('--no-sandbox')
             co.set_argument('--disable-gpu')
             co.set_argument('--disable-dev-shm-usage')
-            co.headless(True)
+            # co.headless(True)  # 禁用 headless 模式以绕过检测
+            co.headless(False)
         else:
-            co.set_argument('--headless=new')
+            # co.set_argument('--headless=new')  # 禁用 headless 模式
+            pass
             
         if proxy_url:
             co.set_proxy(proxy_url)
@@ -466,7 +468,30 @@ class BrowserManager:
             
             print(f"[{self.user_id}] ⏳ Waiting for page to load...")
             page.wait.doc_loaded(timeout=30)
-            time.sleep(3)  # 等待 JS 渲染
+            
+            # 等待关键元素出现 - 更鲁棒的等待策略
+            print(f"[{self.user_id}] 🔍 Waiting for login elements to render...")
+            time.sleep(5)  # 首先等待5秒让JS初始化
+            
+            # 尝试等待"短信登录"文字出现，最多重试3次
+            login_element_found = False
+            for attempt in range(3):
+                try:
+                    # 检查是否有"短信登录"或"验证码登录"文字
+                    sms_login = page.ele('text:短信登录', timeout=5) or page.ele('text:验证码登录', timeout=5)
+                    if sms_login:
+                        print(f"[{self.user_id}] ✅ Login element found!")
+                        login_element_found = True
+                        break
+                except:
+                    if attempt < 2:
+                        print(f"[{self.user_id}] ⚠️  Login element not found, retrying... (attempt {attempt+1}/3)")
+                        time.sleep(3)
+                    else:
+                        print(f"[{self.user_id}] ⚠️  Login element still not found after 3 attempts")
+            
+            # 额外等待确保页面完全渲染
+            time.sleep(2)
             
             self._inject_stealth_scripts()
             
@@ -497,28 +522,46 @@ class BrowserManager:
                     'qrIconPosition': {'x': estimated_x, 'y': estimated_y}
                 }
             
-            # ========== 点击QR图标 ==========
+            
+            # ========== 点击QR图标 (使用 Actions API 模拟真实鼠标) ==========
             if qr_position and qr_position.get('found'):
                 click_x = qr_position['qrIconPosition']['x']
                 click_y = qr_position['qrIconPosition']['y']
                 
-                print(f"[{self.user_id}] 🖱️ Clicking QR icon at ({click_x}, {click_y})...")
+                print(f"[{self.user_id}] 🖱️  Using Actions API to click QR icon at ({click_x}, {click_y})...")
                 
-                # 尝试多个偏移位置
-                offsets = [(0, 0), (-10, 0), (10, 0), (0, -10), (0, 10)]
+                # 使用 Actions API 进行类人操作
+                from DrissionPage.common import Actions
+                ac = Actions(page)
+                
+                # 尝试多个偏移位置，使用真实的鼠标移动和点击
+                offsets = [(0, 0), (-10, 0), (-5, -5), (5, 5), (-10, -10)]
                 
                 for dx, dy in offsets:
-                    self._click_at_position(click_x + dx, click_y + dy)
-                    time.sleep(0.5)
+                    target_x = click_x + dx
+                    target_y = click_y + dy
+                    
+                    print(f"[{self.user_id}] 🎯 Attempting click at ({target_x}, {target_y})...")
+                    
+                    # 模拟真实鼠标移动：先移到附近，再移到目标
+                    ac.move_to((target_x - 50, target_y - 50))  # 移动到附近
+                    time.sleep(0.3)  # 短暂停顿
+                    ac.move_to((target_x, target_y))  # 移动到目标
+                    time.sleep(0.2)  # 短暂停顿
+                    ac.click()  # 点击
+                    
+                    time.sleep(2)  # 等待2秒让页面响应
                     
                     # 检查是否成功切换
                     if self._is_qr_mode():
-                        print(f"[{self.user_id}] ✅ Successfully switched to QR mode!")
+                        print(f"[{self.user_id}] ✅ Successfully switched to QR mode with Actions API!")
                         break
+                    else:
+                        print(f"[{self.user_id}] ⚠️  QR mode not detected, trying next offset...")
             
             # ========== 等待QR码渲染 ==========
-            time.sleep(2)
-            
+            time.sleep(3)  # 增加等待时间确保二维码完全加载
+                
             # ========== 捕获QR码 ==========
             if self._is_qr_mode():
                 qr_image = self._capture_qr_code()
