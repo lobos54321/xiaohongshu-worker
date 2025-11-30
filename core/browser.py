@@ -5,6 +5,10 @@ from DrissionPage import ChromiumPage, ChromiumOptions
 from pyvirtualdisplay import Display
 from .utils import download_video, clean_all_user_data, clean_all_chromium_data
 
+# Constants for QR code icon detection
+QR_ICON_MIN_X_POSITION = 300  # Minimum X position for QR icon (right side of login box)
+LOGIN_BOX_CORNER_OFFSET = 40  # Offset from corner for coordinate-based clicking
+
 class BrowserManager:
     """Manage Chromium browser instances for XHS operations"""
     
@@ -199,13 +203,13 @@ class BrowserManager:
                     try:
                         # Check if SVG is in the right side area of the page
                         rect = svg.rect
-                        if hasattr(rect, 'x') and rect.x > 300:  # Right side
+                        if hasattr(rect, 'x') and rect.x > QR_ICON_MIN_X_POSITION:
                             print(f"[{self.user_id}] 🖱️ Found SVG icon, clicking...")
                             svg.click()
                             qr_switch_clicked = True
                             time.sleep(2)
                             break
-                    except:
+                    except Exception:
                         continue
             except Exception as e:
                 print(f"[{self.user_id}] ⚠️ SVG strategy failed: {e}")
@@ -221,7 +225,7 @@ class BrowserManager:
                             qr_switch_clicked = True
                             time.sleep(2)
                             break
-                        except:
+                        except Exception:
                             continue
                 except Exception as e:
                     print(f"[{self.user_id}] ⚠️ CSS strategy failed: {e}")
@@ -235,8 +239,8 @@ class BrowserManager:
                         rect = login_box.rect
                         if hasattr(rect, 'x') and hasattr(rect, 'width'):
                             # Click top-right corner position
-                            click_x = rect.x + rect.width - 40
-                            click_y = rect.y + 40
+                            click_x = rect.x + rect.width - LOGIN_BOX_CORNER_OFFSET
+                            click_y = rect.y + LOGIN_BOX_CORNER_OFFSET
                             print(f"[{self.user_id}] 🖱️ Clicking top-right corner at ({click_x}, {click_y})...")
                             page.run_js(f'''
                                 var elem = document.elementFromPoint({click_x}, {click_y});
@@ -256,7 +260,7 @@ class BrowserManager:
                         scan_text.click()
                         qr_switch_clicked = True
                         time.sleep(2)
-                except:
+                except Exception:
                     pass
             
             if qr_switch_clicked:
@@ -290,7 +294,7 @@ class BrowserManager:
                             try:
                                 base64_str = src.split('base64,')[1]
                                 return {"status": "waiting_scan", "qr_image": base64_str}
-                            except:
+                            except Exception:
                                 qr_box = img
                                 break
             
@@ -319,7 +323,7 @@ class BrowserManager:
                     print(f"[{self.user_id}] 📸 Taking emergency screenshot...")
                     base64_str = self.page.get_screenshot(as_base64=True)
                     return {"status": "waiting_scan", "qr_image": base64_str, "note": "emergency_fallback"}
-                except:
+                except Exception:
                     pass
             return {"status": "error", "msg": str(e)}
 
