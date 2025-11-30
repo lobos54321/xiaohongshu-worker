@@ -66,6 +66,18 @@ class BrowserManager:
     def start_browser(self, proxy_url: str = None, user_agent: str = None, clear_data: bool = True):
         """Initialize browser session with fallback"""
         
+        # 1. 尝试加载保存的 UA
+        ua_path = os.path.join(self.user_data_dir, "ua.txt")
+        if os.path.exists(ua_path):
+            try:
+                with open(ua_path, "r") as f:
+                    saved_ua = f.read().strip()
+                    if saved_ua:
+                        user_agent = saved_ua
+                        print(f"[{self.user_id}] 🍪 Loaded saved User-Agent")
+            except Exception as e:
+                print(f"[{self.user_id}] ⚠️ Failed to load saved UA: {e}")
+
         if clear_data:
             if self.page:
                 try:
@@ -83,7 +95,34 @@ class BrowserManager:
             
             if os.path.exists(self.user_data_dir):
                 try:
+                    # 注意：如果我们要保留 cookie，可能不能完全删除 user_data_dir
+                    # 但 DrissionPage 的 user_data_dir 包含很多缓存，
+                    # 我们只需要保留 cookies.json 和 ua.txt
+                    # 所以先备份它们，清理后再放回去
+                    
+                    # 备份
+                    cookie_path = os.path.join(self.user_data_dir, "cookies.json")
+                    backup_cookies = None
+                    if os.path.exists(cookie_path):
+                        with open(cookie_path, "r") as f:
+                            backup_cookies = f.read()
+                            
+                    backup_ua = None
+                    if os.path.exists(ua_path):
+                        with open(ua_path, "r") as f:
+                            backup_ua = f.read()
+
                     shutil.rmtree(self.user_data_dir)
+                    os.makedirs(self.user_data_dir, exist_ok=True)
+                    
+                    # 还原
+                    if backup_cookies:
+                        with open(cookie_path, "w") as f:
+                            f.write(backup_cookies)
+                    if backup_ua:
+                        with open(ua_path, "w") as f:
+                            f.write(backup_ua)
+                            
                 except Exception as e:
                     print(f"[{self.user_id}] ⚠️ Failed to clean user data directory: {e}")
         else:
@@ -117,6 +156,27 @@ class BrowserManager:
             print(f"[{self.user_id}] 🚀 Starting new browser instance (Headless: False)...")
             co = self._get_options(proxy_url, user_agent, headless=False)
             self.page = ChromiumPage(co)
+            
+            # 2. 注入保存的 Cookie
+            cookie_path = os.path.join(self.user_data_dir, "cookies.json")
+            if os.path.exists(cookie_path):
+                try:
+                    import json
+                    with open(cookie_path, "r") as f:
+                        cookies = json.load(f)
+                    
+                    print(f"[{self.user_id}] 🍪 Injecting {len(cookies)} cookies...")
+                    # 必须先访问域名才能注入 cookie
+                    self.page.get("https://www.xiaohongshu.com", timeout=30)
+                    
+                    # DrissionPage set.cookies 接收 list 或 dict
+                    self.page.set.cookies(cookies)
+                    
+                    self.page.refresh()
+                    print(f"[{self.user_id}] ✅ Cookies injected successfully")
+                except Exception as e:
+                    print(f"[{self.user_id}] ⚠️ Failed to inject cookies: {e}")
+            
             self._inject_stealth_scripts()
             print(f"[{self.user_id}] ✅ Browser started successfully (Headless: False)")
             return self.page
@@ -128,6 +188,19 @@ class BrowserManager:
             try:
                 co = self._get_options(proxy_url, user_agent, headless=True)
                 self.page = ChromiumPage(co)
+                
+                # 同样尝试注入 Cookie
+                if os.path.exists(cookie_path):
+                    try:
+                        import json
+                        with open(cookie_path, "r") as f:
+                            cookies = json.load(f)
+                        self.page.get("https://www.xiaohongshu.com", timeout=30)
+                        self.page.set.cookies(cookies)
+                        self.page.refresh()
+                    except:
+                        pass
+                
                 self._inject_stealth_scripts()
                 print(f"[{self.user_id}] ✅ Browser started successfully (Headless: True)")
                 return self.page

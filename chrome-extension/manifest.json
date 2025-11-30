@@ -1,0 +1,30 @@
+{
+    "manifest_version": 3,
+    "name": "Prome Automation Helper",
+    "version": "1.0",
+    "description": "Helper extension to sync Xiaohongshu cookies to Prome Platform",
+    "permissions": [
+        "cookies",
+        "activeTab"
+    ],
+    "host_permissions": [
+        "https://*.xiaohongshu.com/",
+        "https://*.tiktok.com/",
+        "https://*.linkedin.com/"
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "externally_connectable": {
+        "matches": [
+            "http://localhost:3000/*",
+            "https://prome-platform.com/*",
+            "https://*.zeabur.app/*"
+        ]
+    },
+    "icons": {
+        "16": "icon16.png",
+        "48": "icon48.png",
+        "128": "icon128.png"
+    }
+}

@@ -110,6 +110,38 @@ async def trigger_publish(
         "message": "Task accepted and queued."
     }
 
+class CookieSyncRequest(BaseModel):
+    user_id: str
+    cookies: List[dict]
+    ua: str
+
+@app.post("/api/v1/login/sync")
+async def api_sync_cookie(
+    req: CookieSyncRequest,
+    authorization: str = Header(None)
+):
+    """
+    Receive cookies from Chrome Extension and save them
+    """
+    if authorization != f"Bearer {WORKER_SECRET}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # Ensure user directory exists
+    user_dir = os.path.abspath(f"data/users/{req.user_id}")
+    os.makedirs(user_dir, exist_ok=True)
+    
+    # Save UA
+    with open(f"{user_dir}/ua.txt", "w") as f:
+        f.write(req.ua)
+        
+    # Save Cookies
+    import json
+    cookie_path = f"{user_dir}/cookies.json"
+    with open(cookie_path, "w") as f:
+        json.dump(req.cookies, f)
+        
+    return {"status": "success", "message": "Cookies synced successfully"}
+
 @app.post("/api/v1/login/qrcode")
 async def get_login_qrcode(
     request: LoginRequest,
