@@ -23,6 +23,18 @@
             "https://*.zeabur.app/*"
         ]
     },
+    "content_scripts": [
+        {
+            "matches": [
+                "http://localhost:3000/*",
+                "https://prome-platform.com/*",
+                "https://www.prome.live/*"
+            ],
+            "js": [
+                "content_script.js"
+            ]
+        }
+    ],
     "icons": {
         "16": "icon16.png",
         "48": "icon48.png",
