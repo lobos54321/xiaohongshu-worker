@@ -2,16 +2,13 @@
 
 echo "🧹 Cleaning all Chromium data..."
 
-# Clean Chromium global config
+# Clean Chromium global config (running as root in Docker)
 rm -rf /root/.config/chromium 2>/dev/null
 rm -rf /root/.cache/chromium 2>/dev/null
 rm -rf /root/.local/share/chromium 2>/dev/null
-rm -rf ~/.config/chromium 2>/dev/null
-rm -rf ~/.cache/chromium 2>/dev/null
 
 # Clean DrissionPage cache
 rm -rf /root/.DrissionPage 2>/dev/null
-rm -rf ~/.DrissionPage 2>/dev/null
 
 # Clean temp files
 rm -rf /tmp/.org.chromium.* 2>/dev/null

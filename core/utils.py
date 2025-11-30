@@ -79,21 +79,24 @@ def clean_all_chromium_data(user_id: str) -> int:
         "/root/.cache/chromium",
         "/root/.local/share/chromium",
         
-        # Chromium global config (current user)
-        os.path.expanduser("~/.config/chromium"),
-        os.path.expanduser("~/.cache/chromium"),
-        os.path.expanduser("~/.local/share/chromium"),
-        
         # DrissionPage cache
-        os.path.expanduser("~/.DrissionPage"),
         "/root/.DrissionPage",
     ]
     
-    # Glob patterns for temp files
+    # Also check current user paths if not running as root
+    import getpass
+    if getpass.getuser() != 'root':
+        dirs_to_clean.extend([
+            os.path.expanduser("~/.config/chromium"),
+            os.path.expanduser("~/.cache/chromium"),
+            os.path.expanduser("~/.local/share/chromium"),
+            os.path.expanduser("~/.DrissionPage"),
+        ])
+    
+    # Glob patterns for Chromium temp files
     glob_patterns = [
         "/tmp/.org.chromium.Chromium*",
         "/tmp/chromium*",
-        "/tmp/.X*-lock",
         "/tmp/Temp-*",
     ]
     
