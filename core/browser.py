@@ -702,11 +702,26 @@ class BrowserManager:
         try:
             cookies_dict = self._get_cookies_dict()
             
-            # 只有 web_session 才是真正的登录凭证，a1 只是设备指纹
+            # 只有 web_session 才是真正的登录凭证
             if 'web_session' in cookies_dict:
-                print(f"[{self.user_id}] 🍪 Found web_session cookie!")
-                return True
-                
+                print(f"[{self.user_id}] 🍪 Found web_session cookie, verifying validity...")
+                # 不要直接返回 True，而是去访问页面验证
+                try:
+                    if "creator" not in self.page.url:
+                        self.page.get("https://creator.xiaohongshu.com/creator/home", timeout=15)
+                    
+                    # 检查是否被重定向回登录页
+                    if "login" in self.page.url:
+                        print(f"[{self.user_id}] ❌ Cookie invalid: Redirected to login page")
+                        return False
+                        
+                    if "creator" in self.page.url:
+                        print(f"[{self.user_id}] ✅ Verified login via URL check")
+                        return True
+                except Exception as e:
+                    print(f"[{self.user_id}] ⚠️ Verification navigation failed: {e}")
+                    return False
+            
             # 如果只有 a1，尝试验证是否真的登录了
             if 'a1' in cookies_dict:
                 try:
