@@ -19,6 +19,7 @@
         "matches": [
             "http://localhost:3000/*",
             "https://prome-platform.com/*",
+            "https://www.prome.live/*",
             "https://*.zeabur.app/*"
         ]
     },
