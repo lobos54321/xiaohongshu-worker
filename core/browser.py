@@ -8,6 +8,16 @@ from .utils import download_video, clean_all_user_data, clean_all_chromium_data
 # Constants for QR code icon detection
 QR_ICON_MIN_X_POSITION = 300  # Minimum X position for QR icon (right side of login box)
 LOGIN_BOX_CORNER_OFFSET = 40  # Offset from corner for coordinate-based clicking
+QR_MIN_SIZE = 80  # Minimum size for valid QR code element
+
+# Stealth JavaScript to bypass browser detection
+STEALTH_JS = """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh', 'en'] });
+window.chrome = { runtime: {} };
+Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' });
+"""
 
 class BrowserManager:
     """Manage Chromium browser instances for XHS operations"""
@@ -64,17 +74,19 @@ class BrowserManager:
         co.set_argument('--no-first-run')
         co.set_argument('--disable-features=TranslateUI')
         
-        # Use incognito mode to completely avoid reading/saving any cookies
-        co.set_argument('--incognito')
-        
         # Disable all caches
         co.set_argument('--disable-application-cache')
         co.set_argument('--disable-cache')
         co.set_argument('--disk-cache-size=0')
         co.set_argument('--media-cache-size=0')
         
-        # Disable local storage
-        co.set_argument('--disable-local-storage')
+        # Anti-detection: Disable webdriver detection
+        co.set_argument('--disable-blink-features=AutomationControlled')
+        
+        # Set fixed window size
+        co.set_argument('--window-size=1920,1080')
+        
+        # Session crashed bubble
         co.set_argument('--disable-session-crashed-bubble')
         
         return co
@@ -151,7 +163,7 @@ class BrowserManager:
             print(f"[{self.user_id}] ⚠️ Failed to get cookies: {e}")
             return {}
 
-    def _is_valid_qr_size(self, element, min_size=80):
+    def _is_valid_qr_size(self, element, min_size=QR_MIN_SIZE):
         """Check if element is large enough (likely a QR code)"""
         try:
             rect = element.rect
@@ -162,6 +174,234 @@ class BrowserManager:
             return False
         except Exception:
             return False
+
+    def _inject_stealth_scripts(self):
+        """Inject anti-detection scripts to bypass browser detection"""
+        if not self.page:
+            return
+        try:
+            self.page.run_js(STEALTH_JS)
+            print(f"[{self.user_id}] 🛡️ Stealth scripts injected")
+        except Exception as e:
+            print(f"[{self.user_id}] ⚠️ Failed to inject stealth scripts: {e}")
+
+    def _wait_for_page_ready(self, timeout=20):
+        """Wait for page to be fully rendered (including JavaScript execution)"""
+        if not self.page:
+            return False
+        
+        print(f"[{self.user_id}] ⏳ Waiting for page to be ready...")
+        ready_indicators = ['短信登录', '扫码登录', '手机号', '登录']
+        
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                for indicator in ready_indicators:
+                    if self.page.ele(f'text:{indicator}', timeout=1):
+                        print(f"[{self.user_id}] ✅ Page ready, found: {indicator}")
+                        return True
+            except Exception:
+                pass
+            time.sleep(0.5)
+        
+        print(f"[{self.user_id}] ⚠️ Page ready timeout, continuing anyway")
+        return False
+
+    def _switch_to_qr_mode(self):
+        """Switch from SMS login to QR code login with multiple strategies"""
+        if not self.page:
+            return False
+        
+        print(f"[{self.user_id}] 🔍 Looking for QR code switch icon in top-right corner...")
+        
+        # Strategy 1: JavaScript click on right-side SVG icon
+        try:
+            result = self.page.run_js(f'''
+                var svgs = document.querySelectorAll('svg');
+                for (var i = 0; i < svgs.length; i++) {{
+                    var rect = svgs[i].getBoundingClientRect();
+                    if (rect.x > {QR_ICON_MIN_X_POSITION} && rect.width > 10 && rect.width < 50) {{
+                        svgs[i].click();
+                        return 'clicked';
+                    }}
+                }}
+                return 'not_found';
+            ''')
+            if result == 'clicked':
+                print(f"[{self.user_id}] ✅ Strategy 1 (JS SVG click) succeeded")
+                time.sleep(2)
+                return True
+        except Exception as e:
+            print(f"[{self.user_id}] ⚠️ Strategy 1 failed: {e}")
+        
+        # Strategy 2: Find the rightmost SVG and click it
+        try:
+            svgs = self.page.eles('tag:svg')
+            rightmost_svg = None
+            max_x = 0
+            for svg in svgs:
+                try:
+                    rect = svg.rect
+                    if hasattr(rect, 'x') and rect.x > max_x:
+                        max_x = rect.x
+                        rightmost_svg = svg
+                except Exception:
+                    continue
+            
+            if rightmost_svg and max_x > QR_ICON_MIN_X_POSITION:
+                print(f"[{self.user_id}] 🖱️ Strategy 2: clicking rightmost SVG at x={max_x}")
+                rightmost_svg.click()
+                time.sleep(2)
+                return True
+        except Exception as e:
+            print(f"[{self.user_id}] ⚠️ Strategy 2 failed: {e}")
+        
+        # Strategy 3: Fixed position click based on viewport
+        try:
+            # Click at fixed position in top-right corner of login box
+            result = self.page.run_js('''
+                var loginBox = document.querySelector('[class*="login"], [class*="form"], [class*="container"]');
+                if (loginBox) {
+                    var rect = loginBox.getBoundingClientRect();
+                    var clickX = rect.right - 30;
+                    var clickY = rect.top + 30;
+                    var elem = document.elementFromPoint(clickX, clickY);
+                    if (elem) {
+                        elem.click();
+                        return 'clicked';
+                    }
+                }
+                return 'not_found';
+            ''')
+            if result == 'clicked':
+                print(f"[{self.user_id}] ✅ Strategy 3 (fixed position) succeeded")
+                time.sleep(2)
+                return True
+        except Exception as e:
+            print(f"[{self.user_id}] ⚠️ Strategy 3 failed: {e}")
+        
+        # Strategy 4: SVG path pattern matching
+        try:
+            result = self.page.run_js('''
+                var svgs = document.querySelectorAll('svg');
+                for (var i = 0; i < svgs.length; i++) {
+                    var paths = svgs[i].querySelectorAll('path');
+                    if (paths.length > 0) {
+                        var d = paths[0].getAttribute('d') || '';
+                        // QR code icon usually has specific path patterns
+                        if (d.length > 50 && d.length < 500) {
+                            var rect = svgs[i].getBoundingClientRect();
+                            if (rect.x > 200) {
+                                svgs[i].click();
+                                return 'clicked';
+                            }
+                        }
+                    }
+                }
+                return 'not_found';
+            ''')
+            if result == 'clicked':
+                print(f"[{self.user_id}] ✅ Strategy 4 (path pattern) succeeded")
+                time.sleep(2)
+                return True
+        except Exception as e:
+            print(f"[{self.user_id}] ⚠️ Strategy 4 failed: {e}")
+        
+        # Strategy 5: XPath search
+        try:
+            # Try to find "扫码登录" text element
+            scan_text = self.page.ele('text:扫码登录', timeout=3)
+            if scan_text:
+                print(f"[{self.user_id}] 🖱️ Strategy 5: Found '扫码登录' text, clicking...")
+                scan_text.click()
+                time.sleep(2)
+                return True
+        except Exception as e:
+            print(f"[{self.user_id}] ⚠️ Strategy 5 failed: {e}")
+        
+        # Strategy 6: Find elements with qr-related class names
+        try:
+            qr_icons = self.page.eles('css:[class*="qr"], css:[class*="scan"], css:[class*="code"]')
+            for icon in qr_icons:
+                try:
+                    print(f"[{self.user_id}] 🖱️ Strategy 6: Found QR-related element, clicking...")
+                    icon.click()
+                    time.sleep(2)
+                    return True
+                except Exception:
+                    continue
+        except Exception as e:
+            print(f"[{self.user_id}] ⚠️ Strategy 6 failed: {e}")
+        
+        print(f"[{self.user_id}] ⚠️ Could not switch to QR mode, will try to capture anyway")
+        return False
+
+    def _capture_qr_code(self):
+        """Capture QR code with multiple strategies"""
+        if not self.page:
+            return None
+        
+        print(f"[{self.user_id}] 🔍 Trying to capture QR code...")
+        
+        # Strategy 1: Canvas element
+        try:
+            canvases = self.page.eles('tag:canvas')
+            for canvas in canvases:
+                if self._is_valid_qr_size(canvas):
+                    print(f"[{self.user_id}] ✅ Found QR in canvas")
+                    return canvas.get_screenshot(as_base64=True)
+        except Exception as e:
+            print(f"[{self.user_id}] ⚠️ Canvas strategy failed: {e}")
+        
+        # Strategy 2: Base64 image
+        try:
+            imgs = self.page.eles('tag:img')
+            for img in imgs:
+                src = img.attr('src') or ''
+                if 'data:image' in src and 'base64' in src:
+                    if self._is_valid_qr_size(img):
+                        print(f"[{self.user_id}] ✅ Found QR in img (base64)")
+                        try:
+                            base64_str = src.split('base64,')[1]
+                            return base64_str
+                        except Exception:
+                            return img.get_screenshot(as_base64=True)
+        except Exception as e:
+            print(f"[{self.user_id}] ⚠️ Base64 image strategy failed: {e}")
+        
+        # Strategy 3: Div with qrcode class
+        try:
+            qr_divs = self.page.eles('css:[class*="qrcode"], css:[class*="qr-"], css:[class*="QRCode"]')
+            for div in qr_divs:
+                if self._is_valid_qr_size(div):
+                    print(f"[{self.user_id}] ✅ Found QR in div")
+                    return div.get_screenshot(as_base64=True)
+        except Exception as e:
+            print(f"[{self.user_id}] ⚠️ QR div strategy failed: {e}")
+        
+        # Strategy 4: JavaScript to extract canvas data
+        try:
+            result = self.page.run_js(f'''
+                var canvases = document.querySelectorAll('canvas');
+                for (var i = 0; i < canvases.length; i++) {{
+                    var canvas = canvases[i];
+                    if (canvas.width > {QR_MIN_SIZE} && canvas.height > {QR_MIN_SIZE}) {{
+                        try {{
+                            return canvas.toDataURL('image/png').split('base64,')[1];
+                        }} catch (e) {{
+                            continue;
+                        }}
+                    }}
+                }}
+                return null;
+            ''')
+            if result:
+                print(f"[{self.user_id}] ✅ Found QR via JS canvas extraction")
+                return result
+        except Exception as e:
+            print(f"[{self.user_id}] ⚠️ JS canvas extraction failed: {e}")
+        
+        return None
 
     def get_login_qrcode(self, proxy_url: str = None, user_agent: str = None):
         """
@@ -179,6 +419,9 @@ class BrowserManager:
             # Always clear data for a fresh login attempt
             page = self.start_browser(proxy_url, user_agent, clear_data=True)
             
+            # Inject stealth scripts to bypass browser detection
+            self._inject_stealth_scripts()
+            
             # 🔥 Navigate directly to login page, without going through root path first
             print(f"[{self.user_id}] 🌐 Navigating directly to creator.xiaohongshu.com/login...")
             page.get('https://creator.xiaohongshu.com/login', timeout=60)
@@ -186,130 +429,31 @@ class BrowserManager:
             # Wait for page to load
             print(f"[{self.user_id}] ⏳ Waiting for page to load...")
             page.wait.doc_loaded(timeout=30)
-            time.sleep(3)
+            
+            # Inject stealth scripts again after navigation
+            self._inject_stealth_scripts()
+            
+            # Wait for page to be fully ready
+            self._wait_for_page_ready(timeout=20)
             
             print(f"[{self.user_id}] 📍 Current URL: {page.url}")
             
             # 🔥 Key step: Click the QR code icon in top-right corner to switch to QR login
             # Default is SMS login mode, need to click the QR code icon in top-right corner
-            print(f"[{self.user_id}] 🔍 Looking for QR code switch icon in top-right corner...")
+            qr_switch_success = self._switch_to_qr_mode()
             
-            qr_switch_clicked = False
-            
-            # Strategy 1: Find SVG elements (QR code icon is usually an SVG)
-            try:
-                svgs = page.eles('tag:svg')
-                for svg in svgs:
-                    try:
-                        # Check if SVG is in the right side area of the page
-                        rect = svg.rect
-                        if hasattr(rect, 'x') and rect.x > QR_ICON_MIN_X_POSITION:
-                            print(f"[{self.user_id}] 🖱️ Found SVG icon, clicking...")
-                            svg.click()
-                            qr_switch_clicked = True
-                            time.sleep(2)
-                            break
-                    except Exception:
-                        continue
-            except Exception as e:
-                print(f"[{self.user_id}] ⚠️ SVG strategy failed: {e}")
-            
-            # Strategy 2: Find elements with qr-related class names
-            if not qr_switch_clicked:
-                try:
-                    qr_icons = page.eles('css:[class*="qr"], css:[class*="scan"], css:[class*="code"]')
-                    for icon in qr_icons:
-                        try:
-                            print(f"[{self.user_id}] 🖱️ Found QR-related element, clicking...")
-                            icon.click()
-                            qr_switch_clicked = True
-                            time.sleep(2)
-                            break
-                        except Exception:
-                            continue
-                except Exception as e:
-                    print(f"[{self.user_id}] ⚠️ CSS strategy failed: {e}")
-            
-            # Strategy 3: Coordinate click - click top-right corner of login box
-            if not qr_switch_clicked:
-                try:
-                    # Find login box container
-                    login_box = page.ele('css:[class*="login"], css:[class*="form"], css:[class*="container"]', timeout=3)
-                    if login_box:
-                        rect = login_box.rect
-                        if hasattr(rect, 'x') and hasattr(rect, 'width'):
-                            # Click top-right corner position
-                            click_x = rect.x + rect.width - LOGIN_BOX_CORNER_OFFSET
-                            click_y = rect.y + LOGIN_BOX_CORNER_OFFSET
-                            print(f"[{self.user_id}] 🖱️ Clicking top-right corner at ({click_x}, {click_y})...")
-                            page.run_js(f'''
-                                var elem = document.elementFromPoint({click_x}, {click_y});
-                                if (elem) elem.click();
-                            ''')
-                            qr_switch_clicked = True
-                            time.sleep(2)
-                except Exception as e:
-                    print(f"[{self.user_id}] ⚠️ Coordinate click failed: {e}")
-            
-            # Strategy 4: Find "扫码登录" text
-            if not qr_switch_clicked:
-                try:
-                    scan_text = page.ele('text:扫码登录', timeout=3)
-                    if scan_text:
-                        print(f"[{self.user_id}] 🖱️ Found '扫码登录' text, clicking...")
-                        scan_text.click()
-                        qr_switch_clicked = True
-                        time.sleep(2)
-                except Exception:
-                    pass
-            
-            if qr_switch_clicked:
+            if qr_switch_success:
                 print(f"[{self.user_id}] ✅ Switched to QR code login mode")
-            else:
-                print(f"[{self.user_id}] ⚠️ Could not switch to QR mode, will try to capture anyway")
             
             # Wait for QR code to render
             print(f"[{self.user_id}] ⏳ Waiting for QR code to render...")
             time.sleep(3)
             
-            # Detect QR code
-            qr_box = None
+            # Try to capture QR code using the improved method
+            qr_base64 = self._capture_qr_code()
             
-            # Strategy 1: canvas element
-            canvases = page.eles('tag:canvas')
-            for canvas in canvases:
-                if self._is_valid_qr_size(canvas):
-                    qr_box = canvas
-                    print(f"[{self.user_id}] ✅ Found QR in canvas")
-                    break
-            
-            # Strategy 2: img with base64 src
-            if not qr_box:
-                imgs = page.eles('tag:img')
-                for img in imgs:
-                    src = img.attr('src') or ''
-                    if 'data:image' in src and 'base64' in src:
-                        if self._is_valid_qr_size(img):
-                            print(f"[{self.user_id}] ✅ Found QR in img (base64)")
-                            try:
-                                base64_str = src.split('base64,')[1]
-                                return {"status": "waiting_scan", "qr_image": base64_str}
-                            except Exception:
-                                qr_box = img
-                                break
-            
-            # Strategy 3: div with qrcode class
-            if not qr_box:
-                qr_divs = page.eles('css:[class*="qrcode"], css:[class*="qr-"]')
-                for div in qr_divs:
-                    if self._is_valid_qr_size(div):
-                        qr_box = div
-                        print(f"[{self.user_id}] ✅ Found QR in div")
-                        break
-            
-            if qr_box:
-                base64_str = qr_box.get_screenshot(as_base64=True)
-                return {"status": "waiting_scan", "qr_image": base64_str}
+            if qr_base64:
+                return {"status": "waiting_scan", "qr_image": qr_base64}
             else:
                 # Fallback: capture entire page so user can see what happened
                 print(f"[{self.user_id}] ⚠️ QR not found, capturing full page...")
