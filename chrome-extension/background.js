@@ -12,10 +12,11 @@ const handleRequest = async (request, sendResponse) => {
       const ua = navigator.userAgent;
 
       // 检查关键的登录 Cookie (web_session)
-      const sessionCookie = cookies.find(c => c.name === "web_session");
+      // const sessionCookie = cookies.find(c => c.name === "web_session");
 
-      if (!sessionCookie) {
-        sendResponse({ success: false, msg: "检测到未登录状态！请登录小红书创作平台：https://creator.xiaohongshu.com/login" });
+      // Relaxed check: Just pass all cookies to backend for verification
+      if (cookies.length === 0) {
+        sendResponse({ success: false, msg: "未检测到任何小红书 Cookie，请先登录小红书创作平台。" });
         return;
       }
 
