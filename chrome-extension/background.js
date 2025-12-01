@@ -11,7 +11,17 @@ const handleRequest = async (request, sendResponse) => {
       console.log("🔍 [Prome Extension] Starting cookie sync...");
       const ua = navigator.userAgent;
 
-      // 尝试多种方式获取 Cookie，以防漏掉
+      // 首先检查当前是否在小红书页面
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const isOnXhsSite = activeTab?.url && (
+        activeTab.url.includes('xiaohongshu.com') ||
+        activeTab.url.includes('xhscdn.com')
+      );
+
+      console.log(`📍 [Prome Extension] Current tab:`, activeTab?.url);
+      console.log(`✅ [Prome Extension] On XHS site:`, isOnXhsSite);
+
+      // 尝试多种方式获取 Cookie
       const [domainCookies, creatorCookies, wwwCookies] = await Promise.all([
         chrome.cookies.getAll({ domain: "xiaohongshu.com" }),
         chrome.cookies.getAll({ url: "https://creator.xiaohongshu.com" }),
@@ -36,10 +46,15 @@ const handleRequest = async (request, sendResponse) => {
       console.log(`✅ [Prome Extension] Total unique cookies: ${cookies.length}`);
       console.log(`📝 [Prome Extension] Cookie names:`, cookies.map(c => c.name));
 
-      // Relaxed check: Just pass all cookies to backend for verification
+      // 如果没有找到Cookie，给出详细指导
       if (cookies.length === 0) {
         console.error("❌ [Prome Extension] No cookies found!");
-        sendResponse({ success: false, msg: "未检测到任何小红书 Cookie，请确保您已登录 https://creator.xiaohongshu.com 并刷新此页面后重试" });
+
+        const errorMsg = isOnXhsSite
+          ? "未检测到小红书 Cookie。请确保您已登录小红书创作平台，然后刷新此页面重试。"
+          : `未检测到小红书 Cookie。\n\n请按以下步骤操作：\n1. 在新标签页中打开并登录 https://creator.xiaohongshu.com\n2. 登录成功后，切换回本页面\n3. 再次点击"一键连接小红书"按钮\n\n或者：\n请确保您已经在 Chrome 中登录小红书创作平台，然后重新加载此插件（chrome://extensions 中点击重新加载）`;
+
+        sendResponse({ success: false, msg: errorMsg });
         return;
       }
 
