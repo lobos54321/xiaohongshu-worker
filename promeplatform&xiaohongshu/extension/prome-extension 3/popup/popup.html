@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prome 小红书助手</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- 头部 -->
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">🚀</span>
+        <span class="logo-text">Prome</span>
+      </div>
+      <div class="status-indicator" id="statusIndicator">
+        <span class="status-dot"></span>
+        <span class="status-text">未连接</span>
+      </div>
+    </header>
+
+    <!-- 未连接状态 - 显示登录表单 -->
+    <div id="loginSection" class="section">
+      <div class="welcome">
+        <h2>欢迎使用 Prome</h2>
+        <p>小红书自动化发布助手</p>
+      </div>
+      
+      <div class="form-group">
+        <label for="apiToken">API Token</label>
+        <input 
+          type="password" 
+          id="apiToken" 
+          placeholder="请输入您的 API Token"
+          autocomplete="off"
+        >
+        <p class="hint">
+          <a href="https://www.prome.live" target="_blank">前往 Prome 获取 Token →</a>
+        </p>
+      </div>
+      
+      <button id="connectBtn" class="btn btn-primary">
+        连接服务
+      </button>
+    </div>
+
+    <!-- 已连接状态 - 显示主面板 -->
+    <div id="mainSection" class="section hidden">
+      <!-- 小红书登录状态 -->
+      <div class="card" id="xhsStatusCard">
+        <div class="card-header">
+          <span class="card-icon">📱</span>
+          <span class="card-title">小红书状态</span>
+        </div>
+        <div class="card-body">
+          <div class="xhs-status" id="xhsStatus">
+            <span class="status-icon">⏳</span>
+            <span class="status-text">检测中...</span>
+          </div>
+          <button id="checkXhsBtn" class="btn btn-small btn-secondary">
+            重新检测
+          </button>
+          <a href="https://creator.xiaohongshu.com" target="_blank" class="btn btn-small btn-outline">
+            打开小红书
+          </a>
+        </div>
+      </div>
+
+      <!-- 快速发布 -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-icon">✍️</span>
+          <span class="card-title">快速发布</span>
+        </div>
+        <div class="card-body">
+          <div class="form-group">
+            <label for="publishTitle">标题</label>
+            <input 
+              type="text" 
+              id="publishTitle" 
+              placeholder="笔记标题（最多20字）"
+              maxlength="20"
+            >
+          </div>
+          
+          <div class="form-group">
+            <label for="publishContent">内容</label>
+            <textarea 
+              id="publishContent" 
+              placeholder="笔记正文..."
+              rows="4"
+            ></textarea>
+          </div>
+          
+          <div class="form-group">
+            <label for="publishImages">图片链接</label>
+            <textarea 
+              id="publishImages" 
+              placeholder="每行一个图片URL"
+              rows="2"
+            ></textarea>
+          </div>
+          
+          <button id="publishNowBtn" class="btn btn-primary">
+            立即发布
+          </button>
+        </div>
+      </div>
+
+      <!-- 定时发布 -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-icon">⏰</span>
+          <span class="card-title">定时发布</span>
+        </div>
+        <div class="card-body">
+          <div class="form-group">
+            <label for="scheduleTime">发布时间</label>
+            <input 
+              type="datetime-local" 
+              id="scheduleTime"
+            >
+          </div>
+          
+          <button id="scheduleBtn" class="btn btn-secondary">
+            添加到计划
+          </button>
+        </div>
+      </div>
+
+      <!-- 发布计划列表 -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-icon">📋</span>
+          <span class="card-title">发布计划</span>
+          <span class="badge" id="taskCount">0</span>
+        </div>
+        <div class="card-body">
+          <div id="taskList" class="task-list">
+            <div class="empty-state">
+              暂无发布计划
+            </div>
+          </div>
+          <button id="syncPlanBtn" class="btn btn-small btn-outline">
+            同步计划
+          </button>
+        </div>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="actions">
+        <button id="disconnectBtn" class="btn btn-danger btn-small">
+          断开连接
+        </button>
+        <a href="https://www.prome.live" target="_blank" class="btn btn-small btn-outline">
+          管理后台
+        </a>
+      </div>
+    </div>
+
+    <!-- 底部 -->
+    <footer class="footer">
+      <span>Prome v1.0.0</span>
+      <a href="https://www.prome.live/help" target="_blank">帮助</a>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

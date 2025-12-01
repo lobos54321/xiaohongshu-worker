@@ -1,0 +1,57 @@
+/* Prome 小红书助手 - 内容脚本样式 */
+
+/* 发布进度提示 */
+.prome-toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 12px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  z-index: 999999;
+  font-size: 14px;
+  font-weight: 500;
+  animation: slideIn 0.3s ease;
+}
+
+.prome-toast.success {
+  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+}
+
+.prome-toast.error {
+  background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* 操作高亮 */
+.prome-highlight {
+  outline: 2px solid #667eea !important;
+  outline-offset: 2px;
+  animation: pulse 1s ease infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    outline-color: #667eea;
+  }
+  50% {
+    outline-color: #764ba2;
+  }
+}
+
+/* 扩展标识 */
+#prome-extension-marker {
+  display: none !important;
+}
