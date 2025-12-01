@@ -8,6 +8,7 @@ const handleRequest = async (request, sendResponse) => {
 
   if (request.action === "SYNC_XHS") {
     try {
+      console.log("🔍 [Prome Extension] Starting cookie sync...");
       const ua = navigator.userAgent;
 
       // 尝试多种方式获取 Cookie，以防漏掉
@@ -17,15 +18,28 @@ const handleRequest = async (request, sendResponse) => {
         chrome.cookies.getAll({ url: "https://www.xiaohongshu.com" })
       ]);
 
+      console.log(`📊 [Prome Extension] Cookie counts:`, {
+        domain: domainCookies.length,
+        creator: creatorCookies.length,
+        www: wwwCookies.length
+      });
+      console.log(`📋 [Prome Extension] Domain cookies:`, domainCookies.map(c => c.name));
+      console.log(`📋 [Prome Extension] Creator cookies:`, creatorCookies.map(c => c.name));
+      console.log(`📋 [Prome Extension] WWW cookies:`, wwwCookies.map(c => c.name));
+
       // 合并并去重
       const allCookies = [...domainCookies, ...creatorCookies, ...wwwCookies];
       const uniqueCookiesMap = new Map();
       allCookies.forEach(c => uniqueCookiesMap.set(c.name + c.domain, c));
       const cookies = Array.from(uniqueCookiesMap.values());
 
+      console.log(`✅ [Prome Extension] Total unique cookies: ${cookies.length}`);
+      console.log(`📝 [Prome Extension] Cookie names:`, cookies.map(c => c.name));
+
       // Relaxed check: Just pass all cookies to backend for verification
       if (cookies.length === 0) {
-        sendResponse({ success: false, msg: "未检测到任何小红书 Cookie，请确保您已登录 https://creator.xiaohongshu.com" });
+        console.error("❌ [Prome Extension] No cookies found!");
+        sendResponse({ success: false, msg: "未检测到任何小红书 Cookie，请确保您已登录 https://creator.xiaohongshu.com 并刷新此页面后重试" });
         return;
       }
 
