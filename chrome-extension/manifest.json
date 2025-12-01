@@ -5,7 +5,8 @@
     "description": "Helper extension to sync Xiaohongshu cookies to Prome Platform",
     "permissions": [
         "cookies",
-        "activeTab"
+        "activeTab",
+        "scripting"
     ],
     "host_permissions": [
         "https://*.xiaohongshu.com/",

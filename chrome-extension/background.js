@@ -11,50 +11,92 @@ const handleRequest = async (request, sendResponse) => {
       console.log("🔍 [Prome Extension] Starting cookie sync...");
       const ua = navigator.userAgent;
 
-      // 首先检查当前是否在小红书页面
-      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      const isOnXhsSite = activeTab?.url && (
-        activeTab.url.includes('xiaohongshu.com') ||
-        activeTab.url.includes('xhscdn.com')
-      );
-
-      console.log(`📍 [Prome Extension] Current tab:`, activeTab?.url);
-      console.log(`✅ [Prome Extension] On XHS site:`, isOnXhsSite);
-
-      // 尝试多种方式获取 Cookie
+      // 方法1: 尝试通过 chrome.cookies API 获取
       const [domainCookies, creatorCookies, wwwCookies] = await Promise.all([
         chrome.cookies.getAll({ domain: "xiaohongshu.com" }),
         chrome.cookies.getAll({ url: "https://creator.xiaohongshu.com" }),
         chrome.cookies.getAll({ url: "https://www.xiaohongshu.com" })
       ]);
 
-      console.log(`📊 [Prome Extension] Cookie counts:`, {
+      console.log(`📊 [Prome Extension] Cookie API counts:`, {
         domain: domainCookies.length,
         creator: creatorCookies.length,
         www: wwwCookies.length
       });
-      console.log(`📋 [Prome Extension] Domain cookies:`, domainCookies.map(c => c.name));
-      console.log(`📋 [Prome Extension] Creator cookies:`, creatorCookies.map(c => c.name));
-      console.log(`📋 [Prome Extension] WWW cookies:`, wwwCookies.map(c => c.name));
 
-      // 合并并去重
+      // 合并 API 获取的 cookies
       const allCookies = [...domainCookies, ...creatorCookies, ...wwwCookies];
       const uniqueCookiesMap = new Map();
       allCookies.forEach(c => uniqueCookiesMap.set(c.name + c.domain, c));
-      const cookies = Array.from(uniqueCookiesMap.values());
+      let cookies = Array.from(uniqueCookiesMap.values());
 
-      console.log(`✅ [Prome Extension] Total unique cookies: ${cookies.length}`);
+      console.log(`✅ [Prome Extension] Total cookies from API: ${cookies.length}`);
+
+      // 方法2: 如果 API 无法获取，尝试从 xiaohongshu.com 标签页注入脚本获取
+      if (cookies.length === 0) {
+        console.log("⚠️ [Prome Extension] Cookie API failed, trying tab injection...");
+
+        try {
+          // 查找所有小红书相关的标签页
+          const xhsTabs = await chrome.tabs.query({
+            url: ["*://*.xiaohongshu.com/*"]
+          });
+
+          console.log(`📑 [Prome Extension] Found ${xhsTabs.length} XHS tabs`);
+
+          if (xhsTabs.length > 0) {
+            // 使用第一个找到的小红书标签页
+            const tab = xhsTabs[0];
+            console.log(`🎯 [Prome Extension] Using tab: ${tab.url}`);
+
+            // 注入脚本获取 document.cookie
+            const results = await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              func: () => document.cookie
+            });
+
+            if (results && results[0] && results[0].result) {
+              const cookieString = results[0].result;
+              console.log(`🍪 [Prome Extension] Got cookie string from page: ${cookieString.substring(0, 100)}...`);
+
+              // 解析 cookie 字符串为对象数组
+              const parsedCookies = cookieString.split('; ').map(c => {
+                const [name, ...valueParts] = c.split('=');
+                return {
+                  name: name,
+                  value: valueParts.join('='),
+                  domain: '.xiaohongshu.com',
+                  path: '/',
+                  secure: true,
+                  httpOnly: false
+                };
+              }).filter(c => c.name && c.value);
+
+              console.log(`📝 [Prome Extension] Parsed ${parsedCookies.length} cookies from document.cookie`);
+              cookies = parsedCookies;
+            }
+          } else {
+            sendResponse({
+              success: false,
+              msg: "未找到小红书标签页。\n\n请按以下步骤操作：\n1. 在新标签页中打开 https://creator.xiaohongshu.com 并登录\n2. 保持该标签页打开\n3. 切换回本页面\n4. 再次点击\"一键连接小红书\""
+            });
+            return;
+          }
+        } catch (injectionError) {
+          console.error("❌ [Prome Extension] Tab injection failed:", injectionError);
+        }
+      }
+
+      console.log(` [Prome Extension] Final cookie count: ${cookies.length}`);
       console.log(`📝 [Prome Extension] Cookie names:`, cookies.map(c => c.name));
 
-      // 如果没有找到Cookie，给出详细指导
+      // 最终检查
       if (cookies.length === 0) {
-        console.error("❌ [Prome Extension] No cookies found!");
-
-        const errorMsg = isOnXhsSite
-          ? "未检测到小红书 Cookie。请确保您已登录小红书创作平台，然后刷新此页面重试。"
-          : `未检测到小红书 Cookie。\n\n请按以下步骤操作：\n1. 在新标签页中打开并登录 https://creator.xiaohongshu.com\n2. 登录成功后，切换回本页面\n3. 再次点击"一键连接小红书"按钮\n\n或者：\n请确保您已经在 Chrome 中登录小红书创作平台，然后重新加载此插件（chrome://extensions 中点击重新加载）`;
-
-        sendResponse({ success: false, msg: errorMsg });
+        console.error("❌ [Prome Extension] No cookies found after all attempts!");
+        sendResponse({
+          success: false,
+          msg: "无法获取小红书 Cookie。\n\n请尝试：\n1. 确保已在 https://creator.xiaohongshu.com 登录\n2. 打开该网站的标签页并保持打开\n3. 刷新 Prome 平台页面\n4. 重新点击连接按钮\n\n如仍无法解决，请联系技术支持。"
+        });
         return;
       }
 
