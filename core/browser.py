@@ -189,6 +189,8 @@ class BrowserManager:
                 co = self._get_options(proxy_url, user_agent, headless=True)
                 self.page = ChromiumPage(co)
                 
+                # 重新定义 cookie_path（fallback 路径需要）
+                cookie_path = os.path.join(self.user_data_dir, "cookies.json")
                 # 同样尝试注入 Cookie
                 if os.path.exists(cookie_path):
                     try:
