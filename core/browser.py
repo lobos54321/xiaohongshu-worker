@@ -792,6 +792,17 @@ class BrowserManager:
                     else:
                         cookies_obj = cookies
                     
+                    print(f"[{self.user_id}] 🍪 Received {len(cookies_obj)} cookies")
+                    print(f"[{self.user_id}] 📝 Cookie names: {[c.get('name') for c in cookies_obj[:10]]}")  # 只打印前10个
+                    
+                    # 确保每个 cookie 都有必要的字段
+                    for cookie in cookies_obj:
+                        if 'domain' not in cookie or not cookie['domain']:
+                            cookie['domain'] = '.xiaohongshu.com'
+                        # 确保domain以.开头（除非是localhost）
+                        if not cookie['domain'].startswith('.') and 'localhost' not in cookie['domain']:
+                            cookie['domain'] = '.' + cookie['domain']
+                    
                     page.set.cookies(cookies_obj)
                     print(f"[{self.user_id}] 🍪 Injected cookies, waiting for page to settle...")
                     time.sleep(2)
