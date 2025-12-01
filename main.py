@@ -695,13 +695,16 @@ async def get_publish_plan(authorization: str = Header(None)):
     return {"tasks": tasks}
 
 
+class ExtensionPublishRequest(BaseModel):
+    title: str
+    content: str
+    images: List[str] = []
+    tags: List[str] = []
+    user_id: str = "default_user"
+
 @app.post("/api/v1/extension/publish")
 async def trigger_extension_publish(
-    title: str,
-    content: str,
-    images: List[str] = [],
-    tags: List[str] = [],
-    user_id: str = "default_user",
+    request: ExtensionPublishRequest,
     authorization: str = Header(None)
 ):
     """
@@ -712,7 +715,7 @@ async def trigger_extension_publish(
         raise HTTPException(status_code=401, detail="Unauthorized")
     
     # Check if extension is connected
-    if not ws_manager.is_connected(user_id):
+    if not ws_manager.is_connected(request.user_id):
         raise HTTPException(
             status_code=400,
             detail="Chrome extension not connected. Please ensure extension is installed and connected."
@@ -722,19 +725,19 @@ async def trigger_extension_publish(
     task_id = f"task_{int(datetime.now().timestamp())}"
     task = {
         "id": task_id,
-        "title": title,
-        "content": content,
-        "images": images,
-        "tags": tags,
+        "title": request.title,
+        "content": request.content,
+        "images": request.images,
+        "tags": request.tags,
         "scheduledTime": datetime.now().isoformat(),
         "status": "executing"
     }
     
     # Add to queue
-    ws_manager.add_task(user_id, task)
+    ws_manager.add_task(request.user_id, task)
     
     # Send to extension immediately
-    await ws_manager.send_message(user_id, {
+    await ws_manager.send_message(request.user_id, {
         "type": "publish",
         "data": task
     })
