@@ -8,15 +8,24 @@ const handleRequest = async (request, sendResponse) => {
 
   if (request.action === "SYNC_XHS") {
     try {
-      const cookies = await chrome.cookies.getAll({ domain: "xiaohongshu.com" });
       const ua = navigator.userAgent;
 
-      // 检查关键的登录 Cookie (web_session)
-      // const sessionCookie = cookies.find(c => c.name === "web_session");
+      // 尝试多种方式获取 Cookie，以防漏掉
+      const [domainCookies, creatorCookies, wwwCookies] = await Promise.all([
+        chrome.cookies.getAll({ domain: "xiaohongshu.com" }),
+        chrome.cookies.getAll({ url: "https://creator.xiaohongshu.com" }),
+        chrome.cookies.getAll({ url: "https://www.xiaohongshu.com" })
+      ]);
+
+      // 合并并去重
+      const allCookies = [...domainCookies, ...creatorCookies, ...wwwCookies];
+      const uniqueCookiesMap = new Map();
+      allCookies.forEach(c => uniqueCookiesMap.set(c.name + c.domain, c));
+      const cookies = Array.from(uniqueCookiesMap.values());
 
       // Relaxed check: Just pass all cookies to backend for verification
       if (cookies.length === 0) {
-        sendResponse({ success: false, msg: "未检测到任何小红书 Cookie，请先登录小红书创作平台。" });
+        sendResponse({ success: false, msg: "未检测到任何小红书 Cookie，请确保您已登录 https://creator.xiaohongshu.com" });
         return;
       }
 
