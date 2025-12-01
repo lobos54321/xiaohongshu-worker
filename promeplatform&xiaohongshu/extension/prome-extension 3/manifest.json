@@ -1,0 +1,61 @@
+{
+  "manifest_version": 3,
+  "name": "Prome 小红书助手",
+  "version": "1.0.0",
+  "description": "小红书自动化发布助手 - 支持定时发布、内容管理",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "storage",
+    "alarms",
+    "tabs",
+    "notifications",
+    "cookies"
+  ],
+  "host_permissions": [
+    "https://creator.xiaohongshu.com/*",
+    "https://www.xiaohongshu.com/*",
+    "https://*.prome.live/*",
+    "https://*.zeabur.app/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://creator.xiaohongshu.com/*",
+        "https://www.xiaohongshu.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}
