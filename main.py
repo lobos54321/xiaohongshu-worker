@@ -6,7 +6,7 @@ load_dotenv()
 
 from datetime import datetime
 from typing import Dict, Optional, List, Union
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, WebSocket, WebSocketDisconnect, Body
 from pydantic import BaseModel
 from core.browser import BrowserManager
 from core.utils import clean_all_user_data
