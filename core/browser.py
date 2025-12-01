@@ -793,16 +793,44 @@ class BrowserManager:
                         cookies_obj = cookies
                     
                     page.set.cookies(cookies_obj)
-                    time.sleep(1)
+                    print(f"[{self.user_id}] 🍪 Injected cookies, waiting for page to settle...")
+                    time.sleep(2)
                     page.refresh()
-                    time.sleep(3)
+                    time.sleep(5)  # 给更多时间让页面完全加载
                 except Exception as e:
                     print(f"[{self.user_id}] ⚠️ Error setting cookies: {e}")
 
-            if "login" in page.url:
-                raise Exception("Cookie expired or not logged in")
-
-            page.get('https://creator.xiaohongshu.com/publish/publish')
+            # 更robust的登录检测：尝试访问发布页面
+            print(f"[{self.user_id}] 🔍 Verifying login by navigating to publish page...")
+            try:
+                page.get('https://creator.xiaohongshu.com/publish/publish', timeout=15)
+                time.sleep(3)
+                
+                # 如果被重定向到登录页，说明Cookie无效
+                if "login" in page.url:
+                    print(f"[{self.user_id}] ❌ Redirected to login page, cookies invalid")
+                    raise Exception("Cookie expired or not logged in")
+                
+                # 如果成功到达发布页，说明已登录
+                if "publish" in page.url:
+                    print(f"[{self.user_id}] ✅ Successfully reached publish page, login verified")
+                else:
+                    # 其他未预期的页面
+                    print(f"[{self.user_id}] ⚠️ Unexpected page: {page.url}")
+                    # 再试一次跳转
+                    page.get('https://creator.xiaohongshu.com/publish/publish', timeout=15)
+                    time.sleep(2)
+                    
+                    if "login" in page.url:
+                        raise Exception("Cookie expired or not logged in")
+                        
+            except Exception as e:
+                if "Cookie expired" in str(e):
+                    raise
+                print(f"[{self.user_id}] ⚠️ Navigation error: {e}, attempting to continue...")
+                # 如果导航失败，再次尝试
+                page.get('https://creator.xiaohongshu.com/publish/publish')
+                time.sleep(3)
             
             if publish_type == 'image':
                 try:
