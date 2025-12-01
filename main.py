@@ -6,7 +6,7 @@ load_dotenv()
 
 from datetime import datetime
 from typing import Dict, Optional, List, Union
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Header
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from core.browser import BrowserManager
 from core.utils import clean_all_user_data
@@ -545,3 +545,202 @@ async def approve_task(
         "jobId": f"job-{int(datetime.now().timestamp())}"
     }
 
+
+# ==================== WebSocket Support for Chrome Extension ====================
+
+class ConnectionManager:
+    """Manage WebSocket connections from Chrome extensions"""
+    
+    def __init__(self):
+        # user_id -> WebSocket connection
+        self.active_connections: Dict[str, WebSocket] = {}
+        # user_id -> publish tasks queue
+        self.publish_queues: Dict[str, List[Dict]] = {}
+    
+    async def connect(self, user_id: str, websocket: WebSocket):
+        """Accept and store WebSocket connection"""
+        await websocket.accept()
+        self.active_connections[user_id] = websocket
+        if user_id not in self.publish_queues:
+            self.publish_queues[user_id] = []
+        print(f"[WebSocket] User {user_id} connected. Total: {len(self.active_connections)}")
+    
+    def disconnect(self, user_id: str):
+        """Remove WebSocket connection"""
+        if user_id in self.active_connections:
+            del self.active_connections[user_id]
+        print(f"[WebSocket] User {user_id} disconnected. Total: {len(self.active_connections)}")
+    
+    def is_connected(self, user_id: str) -> bool:
+        """Check if user is connected via WebSocket"""
+        return user_id in self.active_connections
+    
+    async def send_message(self, user_id: str, message: dict):
+        """Send message to specific user"""
+        if user_id in self.active_connections:
+            websocket = self.active_connections[user_id]
+            try:
+                await websocket.send_json(message)
+                return True
+            except Exception as e:
+                print(f"[WebSocket] Failed to send to {user_id}: {e}")
+                self.disconnect(user_id)
+                return False
+        return False
+    
+    def add_task(self, user_id: str, task: dict):
+        """Add publish task to user's queue"""
+        if user_id not in self.publish_queues:
+            self.publish_queues[user_id] = []
+        self.publish_queues[user_id].append(task)
+    
+    def get_tasks(self, user_id: str) -> List[Dict]:
+        """Get user's publish tasks"""
+        return self.publish_queues.get(user_id, [])
+
+
+# Global connection manager
+ws_manager = ConnectionManager()
+
+
+def verify_extension_token(token: str) -> Optional[str]:
+    """
+    Verify extension token and return user_id
+    For now, use simple token format: "ext_{user_id}"
+    In production, use proper JWT validation
+    """
+    if token and token.startswith("ext_"):
+        return token.replace("ext_", "")
+    # Fallback: use WORKER_SECRET as token
+    if token == WORKER_SECRET:
+        return "default_user"
+    return None
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket, token: str = None):
+    """
+    WebSocket endpoint for Chrome extension
+    URL: wss://your-backend/ws?token=ext_{user_id}
+    """
+    
+    # Verify token
+    if not token:
+        await websocket.close(code=4001, reason="Missing token")
+        return
+    
+    user_id = verify_extension_token(token)
+    if not user_id:
+        await websocket.close(code=4002, reason="Invalid token")
+        return
+    
+    # Accept connection
+    await ws_manager.connect(user_id, websocket)
+    
+    try:
+        while True:
+            # Receive messages from extension
+            data = await websocket.receive_json()
+            await handle_extension_message(user_id, data)
+            
+    except WebSocketDisconnect:
+        ws_manager.disconnect(user_id)
+    except Exception as e:
+        print(f"[WebSocket] Error for {user_id}: {e}")
+        ws_manager.disconnect(user_id)
+
+
+async def handle_extension_message(user_id: str, message: dict):
+    """Handle messages from Chrome extension"""
+    msg_type = message.get("type")
+    data = message.get("data", {})
+    
+    print(f"[WebSocket] Received from {user_id}: {msg_type}")
+    
+    if msg_type == "ping":
+        # Heartbeat response
+        await ws_manager.send_message(user_id, {"type": "pong"})
+    
+    elif msg_type == "publish_result":
+        # Extension completed a publish task
+        task_id = data.get("taskId")
+        success = data.get("success")
+        error_msg = data.get("message", "")
+        
+        print(f"[WebSocket] Task {task_id} {'completed' if success else 'failed'}: {error_msg}")
+        # Here you can update database, notify other services, etc.
+    
+    elif msg_type == "login_status":
+        # Extension reported XHS login status
+        is_logged_in = data.get("isLoggedIn", False)
+        print(f"[WebSocket] User {user_id} XHS login: {is_logged_in}")
+
+
+@app.get("/api/v1/publish-plan")
+async def get_publish_plan(authorization: str = Header(None)):
+    """
+    Get publish plan for Chrome extension
+    Used by extension to sync tasks
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    token = authorization.replace("Bearer ", "")
+    user_id = verify_extension_token(token)
+    
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    tasks = ws_manager.get_tasks(user_id)
+    return {"tasks": tasks}
+
+
+@app.post("/api/v1/extension/publish")
+async def trigger_extension_publish(
+    title: str,
+    content: str,
+    images: List[str] = [],
+    tags: List[str] = [],
+    user_id: str = "default_user",
+    authorization: str = Header(None)
+):
+    """
+    Trigger publish via Chrome extension
+    This sends a publish command to the connected extension
+    """
+    if authorization != f"Bearer {WORKER_SECRET}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    # Check if extension is connected
+    if not ws_manager.is_connected(user_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Chrome extension not connected. Please ensure extension is installed and connected."
+        )
+    
+    # Create publish task
+    task_id = f"task_{int(datetime.now().timestamp())}"
+    task = {
+        "id": task_id,
+        "title": title,
+        "content": content,
+        "images": images,
+        "tags": tags,
+        "scheduledTime": datetime.now().isoformat(),
+        "status": "executing"
+    }
+    
+    # Add to queue
+    ws_manager.add_task(user_id, task)
+    
+    # Send to extension immediately
+    await ws_manager.send_message(user_id, {
+        "type": "publish",
+        "data": task
+    })
+    
+    return {
+        "success": True,
+        "taskId": task_id,
+        "message": "Publish command sent to extension"
+    }
