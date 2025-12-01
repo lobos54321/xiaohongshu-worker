@@ -208,6 +208,55 @@ async def api_sync_cookie(
             del login_sessions[req.user_id]
         return {"status": "error", "message": f"Verification error: {str(e)}"}
 
+
+@app.post("/api/v1/login/sync-complete")
+async def sync_complete_cookies(
+    user_id: str = Body(...),
+    cookies: List[Dict] = Body(...),
+    ua: str = Body(...),
+    authorization: str = Header(None)
+):
+    """
+    接收本地登录工具上传的完整Cookie（包括HttpOnly）
+    用于全自动运营模式
+    """
+    if authorization != f"Bearer {WORKER_SECRET}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    print(f"[{user_id}] 📥 Receiving complete cookies from local tool")
+    print(f"[{user_id}] 🍪 Cookie count: {len(cookies)}")
+    
+    # Create user directory
+    user_dir = os.path.abspath(f"data/users/{user_id}")
+    os.makedirs(user_dir, exist_ok=True)
+    
+    # Save User-Agent
+    ua_path = f"{user_dir}/ua.txt"
+    with open(ua_path, "w") as f:
+        f.write(ua)
+    
+    # Save cookies with metadata
+    cookie_data = {
+        "source": "local_tool",
+        "synced_at": time.time(),
+        "cookies": cookies
+    }
+    
+    cookie_path = f"{user_dir}/cookies.json"
+    with open(cookie_path, "w") as f:
+        json.dump(cookie_data, f, indent=2)
+    
+    print(f"[{user_id}] ✅ Complete cookies saved successfully")
+    print(f"[{user_id}] 📝 Cookie names: {[c['name'] for c in cookies[:10]]}")
+    
+    return {
+        "status": "success",
+        "message": "Complete cookies synced successfully. You can now use full-auto mode.",
+        "cookie_count": len(cookies),
+        "source": "local_tool"
+    }
+
+
 @app.post("/api/v1/login/qrcode")
 async def get_login_qrcode(
     request: LoginRequest,
