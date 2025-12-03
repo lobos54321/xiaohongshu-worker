@@ -25,7 +25,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific frontend domain
+    allow_origins=[
+        "https://prome.live",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://xiaohongshu-automation-ai.zeabur.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -389,6 +394,45 @@ async def close_session(
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+# === Configuration Endpoints ===
+
+@app.get("/api/v1/config/supabase")
+async def get_supabase_config(
+    authorization: str = Header(None)
+):
+    """
+    Return Supabase configuration for Chrome extension
+    This allows the extension to sync analytics data to Supabase
+    """
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+        
+    token = authorization.replace("Bearer ", "")
+    
+    # Allow both WORKER_SECRET and valid extension tokens
+    if token != WORKER_SECRET:
+        # Check if it's a valid extension token
+        user_id = verify_extension_token(token)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_ANON_KEY")
+    
+    if not supabase_url or not supabase_key:
+        raise HTTPException(
+            status_code=500, 
+            detail="Supabase configuration not found in environment variables"
+        )
+    
+    return {
+        "success": True,
+        "config": {
+            "url": supabase_url,
+            "key": supabase_key
+        }
+    }
 
 # === AI Agent Endpoints ===
 
