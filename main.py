@@ -6,7 +6,7 @@ load_dotenv()
 
 from datetime import datetime
 from typing import Dict, Optional, List, Union
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, WebSocket, WebSocketDisconnect, Body
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, WebSocket, WebSocketDisconnect, Body, Response
 from pydantic import BaseModel
 from core.browser import BrowserManager
 from core.utils import clean_all_user_data
@@ -399,23 +399,17 @@ def health():
 
 @app.get("/api/v1/config/supabase")
 async def get_supabase_config(
-    authorization: str = Header(None)
+    response: Response
 ):
     """
     Return Supabase configuration for Chrome extension
     This allows the extension to sync analytics data to Supabase
+    Public endpoint - no auth required (anon key is safe to expose)
     """
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-        
-    token = authorization.replace("Bearer ", "")
-    
-    # Allow both WORKER_SECRET and valid extension tokens
-    if token != WORKER_SECRET:
-        # Check if it's a valid extension token
-        user_id = verify_extension_token(token)
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Unauthorized")
+    # Add CORS headers
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "*"
     
     supabase_url = os.getenv("SUPABASE_URL")
     supabase_key = os.getenv("SUPABASE_ANON_KEY")
@@ -441,12 +435,18 @@ class AnalyticsSyncRequest(BaseModel):
 
 @app.post("/api/v1/analytics/sync")
 async def sync_analytics(
-    request: AnalyticsSyncRequest
+    request: AnalyticsSyncRequest,
+    response: Response
 ):
     """
     Sync analytics data from extension to Supabase via backend
     This serves as a fallback when extension cannot connect to Supabase directly
     """
+    # Add CORS headers
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    
     try:
         supabase_url = os.getenv("SUPABASE_URL")
         supabase_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY")
