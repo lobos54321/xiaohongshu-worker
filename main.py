@@ -434,6 +434,85 @@ async def get_supabase_config(
         }
     }
 
+class AnalyticsSyncRequest(BaseModel):
+    userId: str
+    publishedNotes: List[Dict] = []
+    analyticsData: List[Dict] = []
+
+@app.post("/api/v1/analytics/sync")
+async def sync_analytics(
+    request: AnalyticsSyncRequest
+):
+    """
+    Sync analytics data from extension to Supabase via backend
+    This serves as a fallback when extension cannot connect to Supabase directly
+    """
+    try:
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+        
+        if not supabase_url or not supabase_key:
+            raise HTTPException(status_code=500, detail="Supabase not configured on backend")
+            
+        # Initialize Supabase client
+        from supabase import create_client, Client
+        supabase: Client = create_client(supabase_url, supabase_key)
+        
+        notes_count = 0
+        analytics_count = 0
+        
+        # 1. Sync published notes
+        if request.publishedNotes:
+            # Add user_id to each note
+            notes_data = []
+            for note in request.publishedNotes:
+                note_copy = note.copy()
+                note_copy['user_id'] = request.userId
+                notes_data.append(note_copy)
+                
+            # Upsert notes
+            try:
+                result = supabase.table('xhs_published_notes').upsert(
+                    notes_data, 
+                    on_conflict='user_id,feed_id'
+                ).execute()
+                notes_count = len(result.data) if result.data else 0
+            except Exception as e:
+                print(f"Error syncing notes: {e}")
+                # Try insert if upsert fails (fallback)
+                try:
+                    result = supabase.table('xhs_published_notes').insert(notes_data).execute()
+                    notes_count = len(result.data) if result.data else 0
+                except:
+                    pass
+
+        # 2. Sync analytics data
+        if request.analyticsData:
+            # Add user_id to each record
+            analytics_data = []
+            for item in request.analyticsData:
+                item_copy = item.copy()
+                item_copy['user_id'] = request.userId
+                analytics_data.append(item_copy)
+                
+            # Insert analytics (always new records)
+            try:
+                result = supabase.table('xhs_note_analytics').insert(analytics_data).execute()
+                analytics_count = len(result.data) if result.data else 0
+            except Exception as e:
+                print(f"Error syncing analytics: {e}")
+                raise e
+
+        return {
+            "success": True,
+            "notesCount": notes_count,
+            "analyticsCount": analytics_count
+        }
+        
+    except Exception as e:
+        print(f"Analytics sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # === AI Agent Endpoints ===
 
 class AutoStartRequest(BaseModel):
