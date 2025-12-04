@@ -873,6 +873,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           await saveState('apiToken', message.token);
           await saveState('userId', message.userId);
           connectWebSocket();
+
+          // 立即获取 Supabase 配置
+          await autoFetchSupabaseConfig();
+
           sendResponse({ success: true });
           break;
 
