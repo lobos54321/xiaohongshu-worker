@@ -1,0 +1,13 @@
+[TEST] --- Testing Strategy 1: Direct URL ---
+[TEST] Navigating to https://creator.xiaohongshu.com/login?type=qrcode
+[TEST] ❌ FAILED: QR code NOT found with URL https://creator.xiaohongshu.com/login?type=qrcode
+[TEST] Navigating to https://creator.xiaohongshu.com/login#qrcode
+[TEST] ❌ FAILED: QR code NOT found with URL https://creator.xiaohongshu.com/login#qrcode
+[TEST] --- Testing Strategy 2: Switch Logic ---
+[TEST] Initial State: SMS Mode (assumed)
+[TEST] Attempting Tab Key...
+[TEST] Attempting Top-Right Coordinate Click...
+[TEST] Clicked at coordinates: [1098, 177]
+[TEST] ❌ FAILED: Coordinate Click did not switch mode
+[TEST] --- Testing Strategy 4: Canvas Data Extraction ---
+[TEST] ⚠️ QR code not present, cannot test canvas extraction.
