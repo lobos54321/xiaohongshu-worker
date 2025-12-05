@@ -27,3 +27,19 @@ error_*.html
 
 # Data directories (runtime generated)
 data/
+
+# Test data and results (DO NOT commit)
+test_browser_data/
+test_results/
+test-browser-data/
+test-results/
+
+# Test and debug scripts
+test_*.py
+debug_*.py
+inspect_*.py
+*_test.py
+
+# Logs
+*.log
+server.log

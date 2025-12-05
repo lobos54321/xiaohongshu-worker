@@ -1,0 +1,52 @@
+# Test data - DO NOT include in Docker builds
+test_browser_data/
+test_results/
+test-browser-data/
+test-results/
+
+# Test scripts - not needed in production
+test_*.py
+debug_*.py
+inspect_*.py
+*_test.py
+
+# Git and version control
+.git/
+.gitignore
+.gitattributes
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python cache and bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Local development
+.env.local
+.env.development
+*.log
+server.log
+
+# Documentation and markdown (optional, keep if needed)
+*.md
+!README.md
+
+# Screenshots and debug images
+*.png
+*.jpg
+*.jpeg
+!icons/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
