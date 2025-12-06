@@ -88,7 +88,7 @@ function updateConnectionStatus(connected) {
   }
 }
 
-function updateXhsStatus(loggedIn) {
+function updateXhsStatus(loggedIn, method = '', cookies = []) {
   state.xhsLoggedIn = loggedIn;
   
   const statusEl = elements.xhsStatus;
@@ -100,11 +100,17 @@ function updateXhsStatus(loggedIn) {
       <span class="status-text">小红书已登录</span>
     `;
   } else {
+    // 显示更多帮助信息
+    const cookieInfo = cookies && cookies.length > 0 
+      ? `<br><small style="color:#999;">检测到Cookie: ${cookies.slice(0, 5).join(', ')}${cookies.length > 5 ? '...' : ''}</small>` 
+      : '';
     statusEl.innerHTML = `
       <span class="status-icon">❌</span>
-      <span class="status-text">小红书未登录，请先登录</span>
+      <span class="status-text">小红书未登录，请先登录${cookieInfo}</span>
     `;
   }
+  
+  console.log('XHS status updated:', { loggedIn, method, cookiesCount: cookies?.length });
 }
 
 function updateTaskList(tasks) {
@@ -223,12 +229,21 @@ async function checkXhsLogin() {
       <span class="status-icon">⏳</span>
       <span class="status-text">检测中...</span>
     `;
+    elements.xhsStatus.className = 'xhs-status';
     
+    console.log('Checking XHS login status...');
     const response = await sendMessage({ action: 'CHECK_XHS_LOGIN' });
-    updateXhsStatus(response.isLoggedIn);
+    console.log('XHS login check response:', response);
+    
+    updateXhsStatus(response.isLoggedIn, response.method, response.cookies);
   } catch (error) {
     console.error('Check XHS login error:', error);
-    updateXhsStatus(false);
+    // 显示错误信息
+    elements.xhsStatus.innerHTML = `
+      <span class="status-icon">⚠️</span>
+      <span class="status-text">检测失败: ${error.message}</span>
+    `;
+    elements.xhsStatus.className = 'xhs-status logged-out';
   }
 }
 

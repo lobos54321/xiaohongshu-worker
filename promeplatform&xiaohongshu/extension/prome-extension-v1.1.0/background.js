@@ -49,6 +49,40 @@ function logError(message, error = null) {
   console.error(`[Prome Error ${timestamp}] ${message}`, error || '');
 }
 
+/**
+ * 从小红书 Cookie 生成稳定的账号 ID
+ * 使用 web_session 的哈希值作为唯一标识
+ * @param {Array} cookies - 小红书 Cookie 数组
+ * @returns {string} 稳定的账号 ID (xhs_xxxxxxxx)
+ */
+async function generateXhsAccountId(cookies) {
+  // 查找 web_session cookie
+  const webSessionCookie = cookies.find(c => c.name === 'web_session');
+
+  if (!webSessionCookie || !webSessionCookie.value) {
+    log('No web_session cookie found, using timestamp fallback');
+    return 'xhs_temp_' + Date.now();
+  }
+
+  try {
+    // 使用 SubtleCrypto API 生成 SHA-256 哈希
+    const encoder = new TextEncoder();
+    const data = encoder.encode(webSessionCookie.value);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+    // 返回 xhs_ 前缀 + 前16位哈希
+    const accountId = 'xhs_' + hashHex.substring(0, 16);
+    log('Generated stable account ID:', accountId);
+    return accountId;
+  } catch (error) {
+    logError('Failed to generate account hash:', error);
+    // 降级方案：使用时间戳
+    return 'xhs_temp_' + Date.now();
+  }
+}
+
 // ==================== 存储操作 ====================
 async function saveState(key, value) {
   await chrome.storage.local.set({ [key]: value });
@@ -235,9 +269,9 @@ async function syncToSupabase(config, userId, publishedNotes, analyticsData) {
       user_id: userId
     }));
 
-    // 使用 upsert（基于 feed_id 去重）
+    // 使用 upsert（基于 user_id + title_hash 去重）
     const notesResponse = await fetch(
-      `${url}/rest/v1/xhs_published_notes?on_conflict=user_id,feed_id`,
+      `${url}/rest/v1/xhs_published_notes?on_conflict=user_id,title_hash`,
       {
         method: 'POST',
         headers: {
@@ -278,23 +312,27 @@ async function syncToSupabase(config, userId, publishedNotes, analyticsData) {
     log(`Saved ${notesCount} notes to Supabase`);
   }
 
-  // 2. 保存分析数据（每次都是新记录）
+  // 2. 保存分析数据（使用 upsert 避免重复）
   if (analyticsData && analyticsData.length > 0) {
     const analyticsWithUser = analyticsData.map(data => ({
       ...data,
       user_id: userId
     }));
 
-    const analyticsResponse = await fetch(`${url}/rest/v1/xhs_note_analytics`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': key,
-        'Authorization': `Bearer ${key}`,
-        'Prefer': 'return=representation'
-      },
-      body: JSON.stringify(analyticsWithUser)
-    });
+    // 使用 upsert（基于 user_id + title_hash 去重）
+    const analyticsResponse = await fetch(
+      `${url}/rest/v1/xhs_note_analytics?on_conflict=user_id,title_hash`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': key,
+          'Authorization': `Bearer ${key}`,
+          'Prefer': 'resolution=merge-duplicates,return=representation'
+        },
+        body: JSON.stringify(analyticsWithUser)
+      }
+    );
 
     if (analyticsResponse.ok) {
       const savedAnalytics = await analyticsResponse.json();
@@ -915,6 +953,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             foundLoginCookies: loginResult.foundLoginCookies || [],
             certain: loginResult.certain
           });
+          break;
+
+        case 'GET_XHS_ACCOUNT_ID':
+          // 获取小红书账号的稳定 ID（从 Cookie 哈希）
+          try {
+            const xhsCookies = await chrome.cookies.getAll({ domain: '.xiaohongshu.com' });
+            const accountId = await generateXhsAccountId(xhsCookies);
+            sendResponse({ success: true, accountId });
+          } catch (error) {
+            logError('Failed to generate account ID:', error);
+            sendResponse({ success: false, accountId: null, error: error.message });
+          }
           break;
 
         case 'MANUAL_PUBLISH':
