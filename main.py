@@ -215,6 +215,82 @@ async def api_sync_cookie(
         return {"status": "error", "message": f"Verification error: {str(e)}"}
 
 
+# 前端专用的 Cookie 同步端点（不需要 Bearer token，由 CORS 保护）
+@app.post("/api/v1/login/sync-web")
+async def api_sync_cookie_web(
+    req: CookieSyncRequest
+):
+    """
+    Receive cookies from Web Frontend (prome.live)
+    Protected by CORS - only allowed origins can call this
+    """
+    print(f"[{req.user_id}] 📥 Received cookies from web frontend, count={len(req.cookies)}")
+    
+    # Ensure user directory exists
+    user_dir = os.path.abspath(f"data/users/{req.user_id}")
+    os.makedirs(user_dir, exist_ok=True)
+    
+    # Save UA
+    with open(f"{user_dir}/ua.txt", "w") as f:
+        f.write(req.ua)
+        
+    # Save Cookies
+    import json
+    cookie_path = f"{user_dir}/cookies.json"
+    with open(cookie_path, "w") as f:
+        json.dump(req.cookies, f)
+        
+    # Verify cookies by launching browser
+    print(f"[{req.user_id}] 🔍 Verifying synced cookies...")
+    manager = BrowserManager(req.user_id)
+    
+    # Store in global session to prevent garbage collection during async op
+    login_sessions[req.user_id] = manager
+    
+    try:
+        loop = asyncio.get_running_loop()
+        
+        # Start browser (this will load the saved cookies)
+        await loop.run_in_executor(
+            None,
+            manager.start_browser,
+            None, # proxy
+            None, # ua (will load from file)
+            True  # clear_data (will backup/restore cookies)
+        )
+        
+        # Check login status
+        is_logged_in = await loop.run_in_executor(None, manager.check_login_status)
+        
+        if is_logged_in:
+            print(f"[{req.user_id}] ✅ Cookie verification successful!")
+            manager.close()
+            del login_sessions[req.user_id]
+            return {"success": True, "status": "success", "message": "Cookies synced and verified successfully"}
+        else:
+            print(f"[{req.user_id}] ❌ Cookie verification failed: Not logged in")
+            manager.close()
+            del login_sessions[req.user_id]
+            
+            # Delete invalid cookies
+            if os.path.exists(cookie_path):
+                os.remove(cookie_path)
+            if os.path.exists(f"{user_dir}/ua.txt"):
+                os.remove(f"{user_dir}/ua.txt")
+                
+            return {"success": False, "status": "error", "message": "Cookie verification failed. Please ensure you are logged in to Xiaohongshu."}
+            
+    except Exception as e:
+        print(f"[{req.user_id}] ❌ Cookie verification error: {e}")
+        try:
+            manager.close()
+        except:
+            pass
+        if req.user_id in login_sessions:
+            del login_sessions[req.user_id]
+        return {"success": False, "status": "error", "message": f"Verification error: {str(e)}"}
+
+
 @app.post("/api/v1/login/sync-complete")
 async def sync_complete_cookies(
     user_id: str = Body(...),
