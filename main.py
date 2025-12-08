@@ -443,6 +443,50 @@ async def check_login_status(
     else:
         return {"status": "waiting", "message": "Waiting for scan"}
 
+
+# 前端专用的登录状态检查端点（检查已保存的 Cookie）
+@app.get("/api/v1/login/check-web/{user_id}")
+async def check_login_status_web(user_id: str):
+    """
+    Check if user is logged in using saved cookies
+    Protected by CORS - only allowed origins can call this
+    """
+    import json
+    
+    user_dir = os.path.abspath(f"data/users/{user_id}")
+    cookie_path = f"{user_dir}/cookies.json"
+    
+    # Check if cookies exist
+    if not os.path.exists(cookie_path):
+        print(f"[{user_id}] ❌ No cookies found")
+        return {"status": "not_logged_in", "is_logged_in": False, "message": "No cookies found"}
+    
+    try:
+        # Load cookies
+        with open(cookie_path, "r") as f:
+            cookies = json.load(f)
+        
+        if not cookies or len(cookies) == 0:
+            return {"status": "not_logged_in", "is_logged_in": False, "message": "No cookies found"}
+        
+        # Check for essential cookies that indicate login
+        essential_cookies = ['web_session', 'galaxy_creator_session_id', 'a1']
+        has_essential = any(
+            cookie.get('name') in essential_cookies 
+            for cookie in cookies
+        )
+        
+        if has_essential:
+            print(f"[{user_id}] ✅ Found essential cookies, user is logged in")
+            return {"status": "logged_in", "is_logged_in": True, "message": "User is logged in"}
+        else:
+            print(f"[{user_id}] ⚠️ Cookies exist but no essential login cookies found")
+            return {"status": "not_logged_in", "is_logged_in": False, "message": "No essential login cookies"}
+            
+    except Exception as e:
+        print(f"[{user_id}] ❌ Error checking cookies: {e}")
+        return {"status": "error", "is_logged_in": False, "message": str(e)}
+
 @app.delete("/api/v1/login/session/{user_id}")
 async def close_session(
     user_id: str,
