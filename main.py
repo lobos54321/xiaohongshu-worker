@@ -27,6 +27,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://prome.live",
+        "https://www.prome.live",
         "http://localhost:5173",
         "http://localhost:3000",
         "https://xiaohongshu-automation-ai.zeabur.app"
