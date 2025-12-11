@@ -834,13 +834,25 @@ async def get_xhs_profile_and_sync(
     # Format cookies for requests
     cookie_dict = {c['name']: c['value'] for c in cookies}
     
+    # 🔥 FIX: Add comprehensive browser-like headers to avoid 406
     headers = {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Referer': 'https://www.xiaohongshu.com/',
-        'Origin': 'https://www.xiaohongshu.com'
+        'Origin': 'https://www.xiaohongshu.com',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"macOS"',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-site'
     }
     
     print(f"[{userId}] 🔄 Fetching profile from XHS...")
+    print(f"[{userId}] 🍪 Cookie count: {len(cookie_dict)}, has web_session: {'web_session' in cookie_dict}")
     try:
         resp = requests.get(
             'https://edith.xiaohongshu.com/api/sns/web/v1/user/selfinfo',
