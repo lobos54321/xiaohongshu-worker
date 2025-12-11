@@ -810,7 +810,9 @@ async def get_xhs_profile_and_sync(
     }
     
     print(f"[{userId}] 🔄 Fetching profile from XHS...")
-    print(f"[{userId}] 🍪 Cookie count: {len(cookie_dict)}, has web_session: {'web_session' in cookie_dict}")
+    print(f"[{userId}] 🍪 Cookie count: {len(cookie_dict)}, keys: {list(cookie_dict.keys())[:10]}...")
+    print(f"[{userId}] 🍪 Has web_session: {'web_session' in cookie_dict}, value prefix: {str(web_session)[:20] if web_session else 'N/A'}...")
+    
     try:
         resp = requests.get(
             'https://edith.xiaohongshu.com/api/sns/web/v1/user/selfinfo',
