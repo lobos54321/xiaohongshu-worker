@@ -142,7 +142,9 @@ async def api_sync_cookie(
     authorization: str = Header(None)
 ):
     """
-    Receive cookies from Chrome Extension and save them
+    Receive cookies from Chrome Extension and save them.
+    NOTE: Browser verification removed to avoid crashes in container environments.
+    The cookies will be validated when actually used (e.g., for publishing or profile fetch).
     """
     if authorization != f"Bearer {WORKER_SECRET}":
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -160,59 +162,15 @@ async def api_sync_cookie(
     cookie_path = f"{user_dir}/cookies.json"
     with open(cookie_path, "w") as f:
         json.dump(req.cookies, f)
-        
-    # Verify cookies by launching browser
-    print(f"[{req.user_id}] 🔍 Verifying synced cookies...")
-    manager = BrowserManager(req.user_id)
     
-    # Store in global session to prevent garbage collection during async op
-    login_sessions[req.user_id] = manager
+    print(f"[{req.user_id}] ✅ Cookies saved successfully ({len(req.cookies)} cookies)")
     
-    try:
-        loop = asyncio.get_running_loop()
-        
-        # Start browser (this will load the saved cookies)
-        await loop.run_in_executor(
-            None,
-            manager.start_browser,
-            None, # proxy
-            None, # ua (will load from file)
-            True  # clear_data (will backup/restore cookies)
-        )
-        
-        # Check login status
-        is_logged_in = await loop.run_in_executor(None, manager.check_login_status)
-        
-        if is_logged_in:
-            print(f"[{req.user_id}] ✅ Cookie verification successful!")
-            # Keep the session open or close it? 
-            # For "One-Click", we usually want to close it and let background tasks open it when needed.
-            # But check_login_status might have opened the page.
-            manager.close()
-            del login_sessions[req.user_id]
-            return {"status": "success", "message": "Cookies synced and verified successfully"}
-        else:
-            print(f"[{req.user_id}] ❌ Cookie verification failed: Not logged in")
-            manager.close()
-            del login_sessions[req.user_id]
-            
-            # Delete invalid cookies
-            if os.path.exists(cookie_path):
-                os.remove(cookie_path)
-            if os.path.exists(f"{user_dir}/ua.txt"):
-                os.remove(f"{user_dir}/ua.txt")
-                
-            return {"status": "error", "message": "Cookie verification failed. Please ensure you are logged in to Xiaohongshu."}
-            
-    except Exception as e:
-        print(f"[{req.user_id}] ❌ Cookie verification error: {e}")
-        try:
-            manager.close()
-        except:
-            pass
-        if req.user_id in login_sessions:
-            del login_sessions[req.user_id]
-        return {"status": "error", "message": f"Verification error: {str(e)}"}
+    return {
+        "status": "success", 
+        "message": f"Cookies saved successfully ({len(req.cookies)} cookies)",
+        "user_id": req.user_id,
+        "cookie_count": len(req.cookies)
+    }
 
 
 # 前端专用的 Cookie 同步端点（不需要 Bearer token，由 CORS 保护）
