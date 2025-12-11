@@ -795,7 +795,175 @@ async def approve_task(
     }
 
 
-# ==================== WebSocket Support for Chrome Extension ====================
+
+# ==================== Account Sync Endpoints ====================
+
+@app.get("/agent/xiaohongshu/profile")
+async def get_xhs_profile_and_sync(
+    userId: str,
+    authorization: str = Header(None)
+):
+    """
+    Get user profile from XHS and sync to Supabase
+    This is called by the frontend after login to register the account
+    """
+    # 1. Load Cookies
+    user_dir = os.path.abspath(f"data/users/{userId}")
+    cookie_path = f"{user_dir}/cookies.json"
+    
+    if not os.path.exists(cookie_path):
+        raise HTTPException(status_code=401, detail="No cookies found. Please login first.")
+        
+    try:
+        import json
+        with open(cookie_path, "r") as f:
+            cookies = json.load(f)
+    except:
+        raise HTTPException(status_code=401, detail="Invalid cookie file.")
+        
+    # 2. Extract web_session for hash
+    web_session = next((c['value'] for c in cookies if c['name'] == 'web_session'), None)
+    if not web_session:
+        print(f"[{userId}] ⚠️ Sync failed: No web_session found")
+        # Proceed anyway? No, web_session is critical for identity
+        # raise HTTPException(status_code=400, detail="No web_session cookie found")
+        
+    # 3. Call XHS API
+    import requests
+    
+    # Format cookies for requests
+    cookie_dict = {c['name']: c['value'] for c in cookies}
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://www.xiaohongshu.com/',
+        'Origin': 'https://www.xiaohongshu.com'
+    }
+    
+    print(f"[{userId}] 🔄 Fetching profile from XHS...")
+    try:
+        resp = requests.get(
+            'https://edith.xiaohongshu.com/api/sns/web/v1/user/selfinfo',
+            cookies=cookie_dict,
+            headers=headers,
+            timeout=10
+        )
+    except Exception as e:
+        print(f"[{userId}] ❌ XHS API Request Error: {e}")
+        raise HTTPException(status_code=502, detail="Failed to connect to XHS API")
+        
+    if resp.status_code != 200:
+        print(f"[{userId}] ❌ XHS API Error {resp.status_code}: {resp.text}")
+        raise HTTPException(status_code=resp.status_code, detail="XHS API returned error")
+        
+    data = resp.json()
+    if not data.get("success") or not data.get("data"):
+         print(f"[{userId}] ❌ XHS API Response Invalid: {data}")
+         raise HTTPException(status_code=400, detail="Failed to retrieve profile data")
+         
+    profile = data["data"]
+    nickname = profile.get("nickname", "Unknown")
+    avatar = profile.get("images", "").split("?")[0]
+    red_id = profile.get("red_id", "")
+    xhs_real_id = profile.get("user_id", "")
+    
+    print(f"[{userId}] ✅ Got Profile: {nickname} (ID: {red_id})")
+    
+    # 4. Sync to Supabase
+    supabase_url = os.getenv("SUPABASE_URL")
+    # Prefer Service Role Key for writing to restricted tables
+    supabase_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+    
+    if supabase_url and supabase_key:
+        try:
+            # 4.1 Calculate Session Hash
+            import hashlib
+            session_hash = "unknown_session"
+            if web_session:
+                session_hash = hashlib.sha256(web_session.encode()).hexdigest()[:32]
+            
+            # 4.2 Upsert xhs_accounts
+            # First check if account exists by hash
+            sb_headers = {
+                "apikey": supabase_key,
+                "Authorization": f"Bearer {supabase_key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=representation"
+            }
+            
+            # Check existing
+            check_res = requests.get(
+                f"{supabase_url}/rest/v1/xhs_accounts?xhs_session_hash=eq.{session_hash}&select=id",
+                headers=sb_headers
+            )
+            
+            account_id = None
+            if check_res.ok and len(check_res.json()) > 0:
+                account_id = check_res.json()[0]['id']
+                # Update
+                print(f"[{userId}] 🔄 Updating existing account {account_id}...")
+                requests.patch(
+                    f"{supabase_url}/rest/v1/xhs_accounts?id=eq.{account_id}",
+                    json={
+                        "nickname": nickname,
+                        "avatar_url": avatar,
+                        "red_id": red_id,
+                        "xhs_real_user_id": xhs_real_id,
+                        "updated_at": datetime.now().isoformat()
+                    },
+                    headers=sb_headers
+                )
+            else:
+                # Insert
+                print(f"[{userId}] ➕ Creating new account record...")
+                insert_res = requests.post(
+                    f"{supabase_url}/rest/v1/xhs_accounts",
+                    json={
+                        "xhs_session_hash": session_hash,
+                        "nickname": nickname,
+                        "avatar_url": avatar,
+                        "red_id": red_id,
+                        "xhs_real_user_id": xhs_real_id
+                    },
+                    headers=sb_headers
+                )
+                if insert_res.ok and len(insert_res.json()) > 0:
+                    account_id = insert_res.json()[0]['id']
+            
+            # 4.3 Bind to User (if account_id and supabase_uuid valid)
+            # userId format: user_{uuid}_prome
+            if account_id and userId.startswith("user_") and "_prome" in userId:
+                supabase_uuid = userId.replace("user_", "").replace("_prome", "")
+                
+                print(f"[{userId}] 🔗 Binding account {account_id} to user {supabase_uuid}...")
+                
+                # Check binding
+                requests.post(
+                    f"{supabase_url}/rest/v1/user_xhs_account_bindings",
+                    json={
+                        "supabase_uuid": supabase_uuid,
+                        "xhs_account_id": account_id,
+                        "is_default": False # Or True if first?
+                    },
+                    headers={**sb_headers, "Prefer": "resolution=merge-duplicates"}
+                )
+                
+            print(f"[{userId}] ✅ Sync to Supabase complete")
+            
+        except Exception as e:
+            print(f"[{userId}] ⚠️ Supabase Sync Error: {e}")
+            # Don't fail the request just because sync failed, return profile anyway
+            
+    return {
+        "success": True,
+        "data": {
+            "nickname": nickname,
+            "avatar": avatar,
+            "red_id": red_id,
+            "desc": profile.get("desc", "")
+        }
+    }
+
 
 class ConnectionManager:
     """Manage WebSocket connections from Chrome extensions"""
