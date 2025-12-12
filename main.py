@@ -793,20 +793,19 @@ async def get_xhs_profile_and_sync(
     cookie_dict = {c['name']: c['value'] for c in cookies}
     
     # 🔥 FIX: Add comprehensive browser-like headers to avoid 406
+    # 🔥 FIX: Adjust headers to avoid 406 Not Acceptable
+    # Removing some Sec- headers that might trigger WAF if mismatched
+    # Also ensuring User-Agent matches the one stored
+    ua = cookies[0].get('ua', '') if cookies and 'ua' in cookies[0] else 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': ua,
         'Referer': 'https://www.xiaohongshu.com/',
         'Origin': 'https://www.xiaohongshu.com',
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
         'Connection': 'keep-alive',
-        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-        'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"macOS"',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-site'
+        'Content-Type': 'application/json;charset=UTF-8'
     }
     
     print(f"[{userId}] 🔄 Fetching profile from XHS...")
