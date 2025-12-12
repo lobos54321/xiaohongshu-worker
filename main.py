@@ -800,7 +800,7 @@ async def get_xhs_profile_and_sync(
     else:
         ua = cookies[0].get('ua', '') if cookies and isinstance(cookies[0], dict) and 'ua' in cookies[0] else 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     
-    # 🔥 FIX: Use www.xiaohongshu.com instead of edith, and standard browser headers
+    # 🔥 FIX: Use edith.xiaohongshu.com (more stable for API) with correct UA and headers
     headers = {
         'User-Agent': ua,
         'Referer': 'https://www.xiaohongshu.com/',
@@ -814,18 +814,18 @@ async def get_xhs_profile_and_sync(
         'Sec-Ch-Ua-Platform': '"macOS"',
         'Sec-Fetch-Dest': 'empty',
         'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-origin' # Since we call www from www referer
+        'Sec-Fetch-Site': 'same-site' # same-site for www -> edith
     }
     
-    print(f"[{userId}] 🔄 Fetching profile from XHS (www)...")
+    print(f"[{userId}] 🔄 Fetching profile from XHS (edith)...")
     print(f"[{userId}] 🍪 Cookie count: {len(cookie_dict)}, keys: {list(cookie_dict.keys())[:10]}...")
     print(f"[{userId}] 🍪 Has web_session: {'web_session' in cookie_dict}, value prefix: {str(web_session)[:20] if web_session else 'N/A'}...")
     print(f"[{userId}] 🕵️ Use User-Agent: {ua[:50]}...")
     
     try:
-        # Change to www.xiaohongshu.com endpoint
+        # Revert to edith.xiaohongshu.com endpoint as www often rejects API calls without signature
         resp = requests.get(
-            'https://www.xiaohongshu.com/api/sns/web/v1/user/selfinfo',
+            'https://edith.xiaohongshu.com/api/sns/web/v1/user/selfinfo',
             cookies=cookie_dict,
             headers=headers,
             timeout=10
@@ -839,8 +839,7 @@ async def get_xhs_profile_and_sync(
         # If 406/401, maybe cookies are invalid?
         raise HTTPException(status_code=resp.status_code, detail="XHS API returned error")
         
-    # The response structure from www might be slightly different or same.
-    # Usually it is: { "success": true, "data": { ... } }
+    # The response structure from edith
     data = resp.json()
     if not data.get("success") and data.get("code") != 0: # Check both success and code
          print(f"[{userId}] ❌ XHS API Response Invalid: {data}")
