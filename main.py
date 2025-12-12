@@ -792,29 +792,40 @@ async def get_xhs_profile_and_sync(
     # Format cookies for requests
     cookie_dict = {c['name']: c['value'] for c in cookies}
     
-    # 🔥 FIX: Add comprehensive browser-like headers to avoid 406
-    # 🔥 FIX: Adjust headers to avoid 406 Not Acceptable
-    # Removing some Sec- headers that might trigger WAF if mismatched
-    # Also ensuring User-Agent matches the one stored
-    ua = cookies[0].get('ua', '') if cookies and 'ua' in cookies[0] else 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    # Load UA from file if exists, otherwise try to find in cookies or use default
+    ua_path = f"{user_dir}/ua.txt"
+    if os.path.exists(ua_path):
+        with open(ua_path, "r") as f:
+            ua = f.read().strip()
+    else:
+        ua = cookies[0].get('ua', '') if cookies and isinstance(cookies[0], dict) and 'ua' in cookies[0] else 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     
+    # 🔥 FIX: Use www.xiaohongshu.com instead of edith, and standard browser headers
     headers = {
         'User-Agent': ua,
         'Referer': 'https://www.xiaohongshu.com/',
         'Origin': 'https://www.xiaohongshu.com',
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
         'Connection': 'keep-alive',
-        'Content-Type': 'application/json;charset=UTF-8'
+        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"macOS"',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin' # Since we call www from www referer
     }
     
-    print(f"[{userId}] 🔄 Fetching profile from XHS...")
+    print(f"[{userId}] 🔄 Fetching profile from XHS (www)...")
     print(f"[{userId}] 🍪 Cookie count: {len(cookie_dict)}, keys: {list(cookie_dict.keys())[:10]}...")
     print(f"[{userId}] 🍪 Has web_session: {'web_session' in cookie_dict}, value prefix: {str(web_session)[:20] if web_session else 'N/A'}...")
+    print(f"[{userId}] 🕵️ Use User-Agent: {ua[:50]}...")
     
     try:
+        # Change to www.xiaohongshu.com endpoint
         resp = requests.get(
-            'https://edith.xiaohongshu.com/api/sns/web/v1/user/selfinfo',
+            'https://www.xiaohongshu.com/api/sns/web/v1/user/selfinfo',
             cookies=cookie_dict,
             headers=headers,
             timeout=10
@@ -825,14 +836,17 @@ async def get_xhs_profile_and_sync(
         
     if resp.status_code != 200:
         print(f"[{userId}] ❌ XHS API Error {resp.status_code}: {resp.text}")
+        # If 406/401, maybe cookies are invalid?
         raise HTTPException(status_code=resp.status_code, detail="XHS API returned error")
         
+    # The response structure from www might be slightly different or same.
+    # Usually it is: { "success": true, "data": { ... } }
     data = resp.json()
-    if not data.get("success") or not data.get("data"):
+    if not data.get("success") and data.get("code") != 0: # Check both success and code
          print(f"[{userId}] ❌ XHS API Response Invalid: {data}")
          raise HTTPException(status_code=400, detail="Failed to retrieve profile data")
          
-    profile = data["data"]
+    profile = data.get("data", {})
     nickname = profile.get("nickname", "Unknown")
     avatar = profile.get("images", "").split("?")[0]
     red_id = profile.get("red_id", "")
