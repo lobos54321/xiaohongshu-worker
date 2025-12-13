@@ -809,15 +809,30 @@ async def get_xhs_profile_and_sync(
         raise HTTPException(status_code=502, detail="Failed to connect to XHS API")
         
     if resp.status_code != 200:
-        print(f"[{userId}] ❌ XHS API Error {resp.status_code} Body: {resp.text[:500]}") # Log body for debugging
-        # If 406, it often means the signature/verification failed or it's a bot block
-        raise HTTPException(status_code=resp.status_code, detail=f"XHS API Error: {resp.status_code}")
+        body_preview = (resp.text or "")[:800]  # 截断避免太长
+        print(f"[{userId}] ❌ XHS API Error {resp.status_code} Body: {body_preview}")
+        # 🔥 返回更详细的错误信息给前端
+        raise HTTPException(
+            status_code=resp.status_code, 
+            detail={
+                "message": "XHS API returned error",
+                "xhs_status": resp.status_code,
+                "xhs_body": body_preview
+            }
+        )
         
     # The response structure from edith
     data = resp.json()
-    if not data.get("success") and data.get("code") != 0: # Check both success and code
+    if not data.get("success") and data.get("code") != 0:
          print(f"[{userId}] ❌ XHS API Response Invalid: {data}")
-         raise HTTPException(status_code=400, detail="Failed to retrieve profile data")
+         raise HTTPException(
+             status_code=400, 
+             detail={
+                 "message": "XHS API returned invalid response",
+                 "xhs_code": data.get("code"),
+                 "xhs_body": str(data)[:500]
+             }
+         )
          
     profile = data.get("data", {})
     nickname = profile.get("nickname", "Unknown")
