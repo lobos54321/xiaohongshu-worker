@@ -26,6 +26,9 @@ const CONFIG = {
   }
 };
 
+// Worker Secret for API authentication (should match backend WORKER_SECRET env var)
+const WORKER_SECRET = 'prome_xhs_2024';
+
 // ==================== 状态管理 ====================
 let state = {
   ws: null,
@@ -51,23 +54,38 @@ function logError(message, error = null) {
 
 /**
  * 从小红书 Cookie 生成稳定的账号 ID
- * 使用 web_session 的哈希值作为唯一标识
+ * 支持多种 Cookie 作为标识源：web_session, x-user-id, galaxy_creator_session_id, a1
  * @param {Array} cookies - 小红书 Cookie 数组
  * @returns {string} 稳定的账号 ID (xhs_xxxxxxxx)
  */
 async function generateXhsAccountId(cookies) {
-  // 查找 web_session cookie
-  const webSessionCookie = cookies.find(c => c.name === 'web_session');
+  // 按优先级尝试不同的 cookie
+  const cookiePriority = [
+    'web_session',                           // 主站 session
+    'x-user-id-creator.xiaohongshu.com',    // 创作者中心用户ID
+    'galaxy_creator_session_id',             // 创作者 session
+    'a1'                                     // 设备持久ID
+  ];
 
-  if (!webSessionCookie || !webSessionCookie.value) {
-    log('No web_session cookie found, using timestamp fallback');
+  let selectedCookie = null;
+  for (const cookieName of cookiePriority) {
+    const cookie = cookies.find(c => c.name === cookieName);
+    if (cookie && cookie.value) {
+      selectedCookie = cookie;
+      log('Using cookie for account ID:', cookieName);
+      break;
+    }
+  }
+
+  if (!selectedCookie) {
+    log('No suitable cookie found, using timestamp fallback');
     return 'xhs_temp_' + Date.now();
   }
 
   try {
     // 使用 SubtleCrypto API 生成 SHA-256 哈希
     const encoder = new TextEncoder();
-    const data = encoder.encode(webSessionCookie.value);
+    const data = encoder.encode(selectedCookie.value);
     const hashBuffer = await crypto.subtle.digest('SHA-256', data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -148,34 +166,10 @@ async function autoFetchSupabaseConfig() {
   try {
     log('Fetching Supabase config...');
 
-    // 方法0：尝试从后端 API 获取（新增，最优先）
-    try {
-      if (state.apiToken) {
-        const backendUrl = `${CONFIG.BACKEND_URL}/api/v1/config/supabase`;
-        log('Fetching Supabase config from backend:', backendUrl);
+    // 方法0：尝试从后端 API 获取（已移除，确保使用前端同步配置）
+    // 此处移除了后端 API 获取逻辑，回归到仅依赖前端 prome.live 注入配置的验证状态
+    // 该部分代码被认为是"修改后"的不稳定代码
 
-        const response = await fetch(backendUrl, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${state.apiToken}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.config) {
-            log('Got Supabase config from Backend API');
-            await saveSupabaseConfig(data.config.url, data.config.key, state.userId || '');
-            return { url: data.config.url, key: data.config.key, userId: state.userId || '' };
-          }
-        } else {
-          log('Backend config fetch failed:', response.status);
-        }
-      }
-    } catch (backendError) {
-      log('Backend fetch error:', backendError.message);
-    }
 
     log('Fetching Supabase config from frontend...');
 
@@ -958,8 +952,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'GET_XHS_ACCOUNT_ID':
           // 获取小红书账号的稳定 ID（从 Cookie 哈希）
           try {
-            const xhsCookies = await chrome.cookies.getAll({ domain: '.xiaohongshu.com' });
+            // 尝试多个可能的域名
+            let xhsCookies = await chrome.cookies.getAll({ domain: '.xiaohongshu.com' });
+            log('Cookies from .xiaohongshu.com:', xhsCookies.length);
+
+            if (!xhsCookies.length) {
+              xhsCookies = await chrome.cookies.getAll({ domain: 'xiaohongshu.com' });
+              log('Cookies from xiaohongshu.com:', xhsCookies.length);
+            }
+
+            if (!xhsCookies.length) {
+              xhsCookies = await chrome.cookies.getAll({ domain: 'creator.xiaohongshu.com' });
+              log('Cookies from creator.xiaohongshu.com:', xhsCookies.length);
+            }
+
+            // 尝试获取所有 cookie 并过滤
+            if (!xhsCookies.length) {
+              const allCookies = await chrome.cookies.getAll({});
+              xhsCookies = allCookies.filter(c => c.domain.includes('xiaohongshu'));
+              log('Filtered xiaohongshu cookies:', xhsCookies.length);
+            }
+
+            // 列出所有 cookie 名称便于调试
+            const cookieNames = xhsCookies.map(c => c.name);
+            log('Available cookie names:', cookieNames);
+
             const accountId = await generateXhsAccountId(xhsCookies);
+            log('Generated account ID:', accountId);
             sendResponse({ success: true, accountId });
           } catch (error) {
             logError('Failed to generate account ID:', error);
@@ -1070,6 +1089,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               }
             }
 
+            // Method 2: By domain (to capture cookies like web_session on .xiaohongshu.com)
+            const cookieDomains = [
+              '.xiaohongshu.com',
+              'xiaohongshu.com',
+              'www.xiaohongshu.com'
+            ];
+
+            for (const domain of cookieDomains) {
+              try {
+                const cookies = await chrome.cookies.getAll({ domain });
+                log(`Cookies from domain ${domain}: ${cookies.length}`);
+                fullCookies = fullCookies.concat(cookies);
+              } catch (e) {
+                log(`Failed to get cookies from domain ${domain}:`, e.message);
+              }
+            }
+
             // 去重并转换格式
             const uniqueCookies = [...new Map(fullCookies.map(c => [`${c.name}_${c.domain}`, c])).values()];
             const formattedCookies = uniqueCookies.map(c => ({
@@ -1081,6 +1117,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               httpOnly: c.httpOnly,
               sameSite: c.sameSite
             }));
+
+            // 🔥 DEBUG: Check for web_session specifically
+            const webSessionCookie = formattedCookies.find(c => c.name === 'web_session');
+            if (webSessionCookie) {
+              log(`✅ web_session FOUND! Domain: ${webSessionCookie.domain}, Value prefix: ${webSessionCookie.value.substring(0, 20)}...`);
+            } else {
+              log(`❌ web_session NOT FOUND in ${formattedCookies.length} cookies`);
+              log(`Available cookie names: ${formattedCookies.map(c => c.name).join(', ')}`);
+            }
 
             sendResponse({
               success: true,
@@ -1152,6 +1197,109 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             });
             sendResponse({ success: true });
           } catch (error) {
+            sendResponse({ success: false, error: error.message });
+          }
+          break;
+
+        // ===== 🔥 新增：同步 Cookies 到后端 =====
+        case 'SYNC_COOKIES_TO_BACKEND':
+          log('Syncing cookies to backend...');
+          try {
+            const targetUserId = message.userId;
+            if (!targetUserId) {
+              sendResponse({ success: false, error: 'userId is required' });
+              break;
+            }
+
+            // 1. 获取小红书 Cookies - 使用多种方式确保获取 web_session
+            let fullCookies = [];
+
+            // Method 1: By URL
+            const cookieUrls = [
+              'https://www.xiaohongshu.com',
+              'https://creator.xiaohongshu.com',
+              'https://edith.xiaohongshu.com'
+            ];
+
+            for (const url of cookieUrls) {
+              try {
+                const cookies = await chrome.cookies.getAll({ url });
+                log(`Cookies from URL ${url}: ${cookies.length}`);
+                fullCookies = fullCookies.concat(cookies);
+              } catch (e) {
+                log(`Failed to get cookies from ${url}:`, e.message);
+              }
+            }
+
+            // Method 2: By domain (to capture cookies like web_session on .xiaohongshu.com)
+            const cookieDomains = [
+              '.xiaohongshu.com',
+              'xiaohongshu.com',
+              'www.xiaohongshu.com'
+            ];
+
+            for (const domain of cookieDomains) {
+              try {
+                const cookies = await chrome.cookies.getAll({ domain });
+                log(`Cookies from domain ${domain}: ${cookies.length}`);
+                fullCookies = fullCookies.concat(cookies);
+              } catch (e) {
+                log(`Failed to get cookies from domain ${domain}:`, e.message);
+              }
+            }
+
+            // 去重 (by name + domain)
+            const uniqueCookies = [...new Map(fullCookies.map(c => [`${c.name}_${c.domain}`, c])).values()];
+            const formattedCookies = uniqueCookies.map(c => ({
+              name: c.name,
+              value: c.value,
+              domain: c.domain,
+              path: c.path,
+              secure: c.secure,
+              httpOnly: c.httpOnly,
+              sameSite: c.sameSite
+            }));
+
+            // 🔥 Check if we have the critical web_session cookie
+            const hasWebSession = formattedCookies.some(c => c.name === 'web_session');
+            const foundNames = formattedCookies.map(c => `${c.name} (${c.domain})`);
+            log(`Total unique cookies: ${formattedCookies.length}`);
+            log(`Cookie names found: ${JSON.stringify(foundNames)}`);
+            log(`Has web_session: ${hasWebSession}`);
+
+            if (formattedCookies.length === 0) {
+              sendResponse({ success: false, error: 'No cookies found' });
+              break;
+            }
+
+            log(`Found ${formattedCookies.length} cookies, syncing to backend...`);
+
+            // 2. 发送到后端
+            const response = await fetch(`${CONFIG.BACKEND_URL}/api/v1/login/sync`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${WORKER_SECRET || 'default_secret_key'}`
+              },
+              body: JSON.stringify({
+                user_id: targetUserId,
+                cookies: formattedCookies,
+                ua: navigator.userAgent
+              })
+            });
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              log('Backend sync error:', errorText);
+              sendResponse({ success: false, error: `Backend error: ${response.status}` });
+              break;
+            }
+
+            const result = await response.json();
+            log('Cookie sync result:', result);
+            sendResponse({ success: true, result });
+          } catch (error) {
+            logError('Failed to sync cookies to backend:', error);
             sendResponse({ success: false, error: error.message });
           }
           break;
