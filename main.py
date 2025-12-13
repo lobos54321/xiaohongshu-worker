@@ -809,16 +809,12 @@ async def get_xhs_profile_and_sync(
         raise HTTPException(status_code=502, detail="Failed to connect to XHS API")
         
     if resp.status_code != 200:
-        body_preview = (resp.text or "")[:800]  # 截断避免太长
+        body_preview = (resp.text or "")[:500]  # 截断避免太长
         print(f"[{userId}] ❌ XHS API Error {resp.status_code} Body: {body_preview}")
-        # 🔥 返回更详细的错误信息给前端
+        # 🔥 返回字符串格式的 detail（兼容前端）
         raise HTTPException(
             status_code=resp.status_code, 
-            detail={
-                "message": "XHS API returned error",
-                "xhs_status": resp.status_code,
-                "xhs_body": body_preview
-            }
+            detail=f"XHS API Error {resp.status_code}: {body_preview}"
         )
         
     # The response structure from edith
@@ -827,11 +823,7 @@ async def get_xhs_profile_and_sync(
          print(f"[{userId}] ❌ XHS API Response Invalid: {data}")
          raise HTTPException(
              status_code=400, 
-             detail={
-                 "message": "XHS API returned invalid response",
-                 "xhs_code": data.get("code"),
-                 "xhs_body": str(data)[:500]
-             }
+             detail=f"XHS API returned invalid response (code={data.get('code')}): {str(data)[:300]}"
          )
          
     profile = data.get("data", {})
