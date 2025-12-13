@@ -181,8 +181,19 @@ async def api_sync_cookie_web(
     """
     Receive cookies from Web Frontend (prome.live)
     Protected by CORS - only allowed origins can call this
+    Cookies from the extension are trusted and saved directly without browser verification
     """
     print(f"[{req.user_id}] 📥 Received cookies from web frontend, count={len(req.cookies)}")
+    
+    # Check for essential cookies
+    cookie_names = [c.get('name', '') for c in req.cookies]
+    has_web_session = 'web_session' in cookie_names
+    has_a1 = 'a1' in cookie_names
+    
+    print(f"[{req.user_id}] 🔍 Cookie check: web_session={has_web_session}, a1={has_a1}")
+    
+    if not has_a1:
+        return {"success": False, "status": "error", "message": "Missing essential cookie (a1). Please ensure you are logged in to Xiaohongshu."}
     
     # Ensure user directory exists
     user_dir = os.path.abspath(f"data/users/{req.user_id}")
@@ -197,56 +208,17 @@ async def api_sync_cookie_web(
     cookie_path = f"{user_dir}/cookies.json"
     with open(cookie_path, "w") as f:
         json.dump(req.cookies, f)
-        
-    # Verify cookies by launching browser
-    print(f"[{req.user_id}] 🔍 Verifying synced cookies...")
-    manager = BrowserManager(req.user_id)
     
-    # Store in global session to prevent garbage collection during async op
-    login_sessions[req.user_id] = manager
+    print(f"[{req.user_id}] ✅ Cookies saved successfully (skipping browser verification - trusted source)")
     
-    try:
-        loop = asyncio.get_running_loop()
-        
-        # Start browser (this will load the saved cookies)
-        await loop.run_in_executor(
-            None,
-            manager.start_browser,
-            None, # proxy
-            None, # ua (will load from file)
-            True  # clear_data (will backup/restore cookies)
-        )
-        
-        # Check login status
-        is_logged_in = await loop.run_in_executor(None, manager.check_login_status)
-        
-        if is_logged_in:
-            print(f"[{req.user_id}] ✅ Cookie verification successful!")
-            manager.close()
-            del login_sessions[req.user_id]
-            return {"success": True, "status": "success", "message": "Cookies synced and verified successfully"}
-        else:
-            print(f"[{req.user_id}] ❌ Cookie verification failed: Not logged in")
-            manager.close()
-            del login_sessions[req.user_id]
-            
-            # Delete invalid cookies
-            if os.path.exists(cookie_path):
-                os.remove(cookie_path)
-            if os.path.exists(f"{user_dir}/ua.txt"):
-                os.remove(f"{user_dir}/ua.txt")
-                
-            return {"success": False, "status": "error", "message": "Cookie verification failed. Please ensure you are logged in to Xiaohongshu."}
-            
-    except Exception as e:
-        print(f"[{req.user_id}] ❌ Cookie verification error: {e}")
-        try:
-            manager.close()
-        except:
-            pass
-        if req.user_id in login_sessions:
-            del login_sessions[req.user_id]
-        return {"success": False, "status": "error", "message": f"Verification error: {str(e)}"}
+    return {
+        "success": True, 
+        "status": "success", 
+        "message": "Cookies synced successfully",
+        "has_web_session": has_web_session,
+        "cookie_count": len(req.cookies)
+    }
+
 
 
 @app.post("/api/v1/login/sync-complete")
@@ -792,15 +764,17 @@ async def get_xhs_profile_and_sync(
     # Format cookies for requests
     cookie_dict = {c['name']: c['value'] for c in cookies}
     
-    # Load UA from file if exists, otherwise try to find in cookies or use default
+    # Load UA from file if exists
     ua_path = f"{user_dir}/ua.txt"
     if os.path.exists(ua_path):
         with open(ua_path, "r") as f:
             ua = f.read().strip()
-    else:
-        ua = cookies[0].get('ua', '') if cookies and isinstance(cookies[0], dict) and 'ua' in cookies[0] else 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     
-    # 🔥 FIX: Use edith.xiaohongshu.com (more stable for API) with correct UA and headers
+    # Fallback to a modern stable UA if file read failed or empty
+    if not ua or len(ua) < 10:
+         ua = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+            
+    # 🔥 FIX: Use edith.xiaohongshu.com with updated headers
     headers = {
         'User-Agent': ua,
         'Referer': 'https://www.xiaohongshu.com/',
@@ -809,35 +783,35 @@ async def get_xhs_profile_and_sync(
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'Accept-Encoding': 'gzip, deflate, br',
         'Connection': 'keep-alive',
-        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'Sec-Ch-Ua': '"Chromium";v="122", "Google Chrome";v="122"',
         'Sec-Ch-Ua-Mobile': '?0',
         'Sec-Ch-Ua-Platform': '"macOS"',
         'Sec-Fetch-Dest': 'empty',
         'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-site' # same-site for www -> edith
+        'Sec-Fetch-Site': 'same-site',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
     }
     
     print(f"[{userId}] 🔄 Fetching profile from XHS (edith)...")
-    print(f"[{userId}] 🍪 Cookie count: {len(cookie_dict)}, keys: {list(cookie_dict.keys())[:10]}...")
-    print(f"[{userId}] 🍪 Has web_session: {'web_session' in cookie_dict}, value prefix: {str(web_session)[:20] if web_session else 'N/A'}...")
-    print(f"[{userId}] 🕵️ Use User-Agent: {ua[:50]}...")
+    print(f"[{userId}] 🍪 Cookie count: {len(cookie_dict)}")
+    print(f"[{userId}] 🕵️ UA used: {ua[:50]}...")
     
     try:
-        # Revert to edith.xiaohongshu.com endpoint as www often rejects API calls without signature
         resp = requests.get(
             'https://edith.xiaohongshu.com/api/sns/web/v1/user/selfinfo',
             cookies=cookie_dict,
             headers=headers,
-            timeout=10
+            timeout=15
         )
     except Exception as e:
-        print(f"[{userId}] ❌ XHS API Request Error: {e}")
+        print(f"[{userId}] ❌ XHS API Request Exception: {e}")
         raise HTTPException(status_code=502, detail="Failed to connect to XHS API")
         
     if resp.status_code != 200:
-        print(f"[{userId}] ❌ XHS API Error {resp.status_code}: {resp.text}")
-        # If 406/401, maybe cookies are invalid?
-        raise HTTPException(status_code=resp.status_code, detail="XHS API returned error")
+        print(f"[{userId}] ❌ XHS API Error {resp.status_code} Body: {resp.text[:500]}") # Log body for debugging
+        # If 406, it often means the signature/verification failed or it's a bot block
+        raise HTTPException(status_code=resp.status_code, detail=f"XHS API Error: {resp.status_code}")
         
     # The response structure from edith
     data = resp.json()
