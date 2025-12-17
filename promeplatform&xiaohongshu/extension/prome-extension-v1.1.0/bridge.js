@@ -220,6 +220,34 @@ window.addEventListener('message', async (event) => {
       }, '*');
     }
   }
+
+  // ===== 🔥 新增：同步 Cookies 到后端 =====
+  if (type === 'PROME_SYNC_COOKIES_TO_BACKEND') {
+    log('📥 Received cookie sync to backend request:', data);
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: 'SYNC_COOKIES_TO_BACKEND',
+        userId: data.userId
+      });
+
+      log('📤 Cookie sync response:', response);
+
+      window.postMessage({
+        type: 'PROME_SYNC_COOKIES_RESULT',
+        success: response?.success,
+        result: response?.result,
+        error: response?.error
+      }, '*');
+    } catch (error) {
+      log('❌ Error syncing cookies to backend:', error);
+      window.postMessage({
+        type: 'PROME_SYNC_COOKIES_RESULT',
+        success: false,
+        error: error.message
+      }, '*');
+    }
+  }
 });
 
 // ==================== 监听来自 background 的消息 ====================

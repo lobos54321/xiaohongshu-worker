@@ -1404,3 +1404,828 @@ chrome.runtime.onInstalled.addListener((details) => {
     });
   }
 });
+
+// ==================== Step Executor for AI Control Center ====================
+// Phase 1 MVP: 从 Supabase 拉取 pending steps 并执行
+
+const STEP_EXECUTOR_CONFIG = {
+  POLL_INTERVAL: 30000,  // 30 秒
+  LOCK_OWNER: 'prome-extension-v1.1.0',
+  SUPPORTED_STEP_TYPES: ['publish', 'fetch_metrics'],
+};
+
+let stepExecutorState = {
+  isRunning: false,
+  pollTimer: null,
+  currentStep: null,
+  xhsAccountId: null,
+};
+
+/**
+ * 初始化 Step Executor
+ */
+async function initStepExecutor(xhsAccountId) {
+  log('[StepExecutor] Initializing with account:', xhsAccountId);
+  stepExecutorState.xhsAccountId = xhsAccountId;
+
+  if (stepExecutorState.isRunning) {
+    log('[StepExecutor] Already running');
+    return;
+  }
+
+  stepExecutorState.isRunning = true;
+  startStepPolling();
+  log('[StepExecutor] Initialized');
+}
+
+function stopStepExecutor() {
+  stepExecutorState.isRunning = false;
+  if (stepExecutorState.pollTimer) {
+    clearInterval(stepExecutorState.pollTimer);
+    stepExecutorState.pollTimer = null;
+  }
+}
+
+function startStepPolling() {
+  if (stepExecutorState.pollTimer) {
+    clearInterval(stepExecutorState.pollTimer);
+  }
+  pollPendingSteps();
+  stepExecutorState.pollTimer = setInterval(pollPendingSteps, STEP_EXECUTOR_CONFIG.POLL_INTERVAL);
+}
+
+async function pollPendingSteps() {
+  if (!stepExecutorState.isRunning || !stepExecutorState.xhsAccountId || stepExecutorState.currentStep) {
+    return;
+  }
+
+  try {
+    const config = await getSupabaseConfigFromStorage();
+    if (!config.url || !config.key) return;
+
+    const now = new Date().toISOString();
+    const response = await fetch(
+      `${config.url}/rest/v1/xhs_task_steps?` +
+      `xhs_account_id=eq.${stepExecutorState.xhsAccountId}&` +
+      `status=eq.pending&` +
+      `step_type=in.(${STEP_EXECUTOR_CONFIG.SUPPORTED_STEP_TYPES.join(',')})&` +
+      `or=(scheduled_at.is.null,scheduled_at.lte.${encodeURIComponent(now)})&` +
+      `order=created_at.asc&limit=1`,
+      {
+        headers: {
+          'apikey': config.key,
+          'Authorization': `Bearer ${config.key}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    if (!response.ok) return;
+    const steps = await response.json();
+    if (steps.length === 0) return;
+
+    const step = steps[0];
+    log('[StepExecutor] Found pending step:', step.id, step.step_type);
+    await executeStepWithLock(step, config);
+
+  } catch (error) {
+    logError('[StepExecutor] Poll error:', error);
+  }
+}
+
+async function executeStepWithLock(step, config) {
+  try {
+    // Lock
+    const lockResponse = await fetch(`${config.url}/rest/v1/rpc/lock_task_step`, {
+      method: 'POST',
+      headers: {
+        'apikey': config.key,
+        'Authorization': `Bearer ${config.key}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ p_step_id: step.id, p_lock_owner: STEP_EXECUTOR_CONFIG.LOCK_OWNER })
+    });
+
+    if (!lockResponse.ok) {
+      log('[StepExecutor] Failed to lock step');
+      return;
+    }
+
+    const lockResult = await lockResponse.json();
+    const lockedStep = Array.isArray(lockResult) && lockResult.length > 0 ? lockResult[0] : null;
+    if (!lockedStep) return;
+
+    stepExecutorState.currentStep = lockedStep;
+    log('[StepExecutor] Step locked:', lockedStep.id);
+
+    // Execute
+    let result;
+    switch (step.step_type) {
+      case 'publish':
+        result = await executePublishStepHandler(lockedStep, config);
+        break;
+      case 'fetch_metrics':
+        result = await executeFetchMetricsHandler(lockedStep, config);
+        break;
+      default:
+        result = { success: false, error: 'Unsupported step type' };
+    }
+
+    // Finish
+    await fetch(`${config.url}/rest/v1/rpc/finish_task_step`, {
+      method: 'POST',
+      headers: {
+        'apikey': config.key,
+        'Authorization': `Bearer ${config.key}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        p_step_id: lockedStep.id,
+        p_status: result.success ? 'succeeded' : 'failed',
+        p_output_payload: result.output || {},
+        p_usage: result.usage || {},
+        p_provider: 'prome-extension',
+        p_provider_run_id: null,
+        p_error: result.error ? { error: result.error } : null
+      })
+    });
+
+    log('[StepExecutor] Step completed:', lockedStep.id, result.success ? 'succeeded' : 'failed');
+
+    // Refresh task status
+    await fetch(`${config.url}/rest/v1/rpc/refresh_task_status`, {
+      method: 'POST',
+      headers: {
+        'apikey': config.key,
+        'Authorization': `Bearer ${config.key}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ p_task_id: lockedStep.task_id })
+    });
+
+  } catch (error) {
+    logError('[StepExecutor] Execute error:', error);
+  } finally {
+    stepExecutorState.currentStep = null;
+  }
+}
+
+// Real publish handler - fetches task data and triggers existing publish flow
+async function executePublishStepHandler(step, config) {
+  log('[StepExecutor] Executing publish step (real)...');
+
+  try {
+    // 1. 获取关联的 Task 信息
+    const taskResponse = await fetch(
+      `${config.url}/rest/v1/xhs_daily_tasks?id=eq.${step.task_id}&select=*`,
+      {
+        headers: {
+          'apikey': config.key,
+          'Authorization': `Bearer ${config.key}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    if (!taskResponse.ok) {
+      throw new Error('Failed to fetch task: ' + taskResponse.status);
+    }
+
+    const tasks = await taskResponse.json();
+    if (tasks.length === 0) {
+      throw new Error('Task not found');
+    }
+
+    const task = tasks[0];
+    log('[StepExecutor] Task data:', task.title);
+
+    // 2. 检查 review_mode
+    const reviewMode = task.metadata?.review_mode || 'auto_publish';
+
+    if (reviewMode === 'manual_confirm' || reviewMode === 'human_review') {
+      // 需要用户手动确认 - 创建通知
+      log('[StepExecutor] Publish requires manual confirmation, showing notification');
+
+      chrome.notifications.create(`publish_confirm_${step.id}`, {
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: '📝 发布确认',
+        message: `待发布: ${task.title || '(无标题)'}\n点击确认后发布`,
+        priority: 2,
+        requireInteraction: true
+      });
+
+      // 保存待发布数据供用户点击通知时使用
+      await chrome.storage.local.set({
+        [`pendingPublish_${step.id}`]: {
+          stepId: step.id,
+          taskId: task.id,
+          title: task.title || '',
+          content: task.content || '',
+          images: task.image_urls || [],
+          video: null,
+          reviewMode: reviewMode
+        }
+      });
+
+      // 🔥 返回等待状态 - 不执行自动发布
+      // 用户点击通知后会触发 REVIEW_CONFIRM_RESPONSE 处理
+      return {
+        success: true,
+        output: {
+          status: 'pending_review',
+          message: '等待用户确认发布',
+          notification_id: `publish_confirm_${step.id}`,
+          review_mode: reviewMode
+        }
+      };
+    }
+
+    // 3. auto_publish 模式：直接发布
+    log('[StepExecutor] Auto-publish mode, proceeding...');
+
+    // 构建发布数据
+    const publishData = {
+      taskId: step.id,  // 使用 step_id 作为 taskId
+      title: task.title || '',
+      content: task.content || '',
+      images: task.image_urls || [],
+      video: null,
+      videos: [],
+      stepExecutor: true,  // 标记来自 step executor
+      orchestratorTaskId: task.id
+    };
+
+    log('[StepExecutor] Publishing with data:', publishData.title);
+
+    // 4. 打开发布页面并执行
+    return await executePublishFlow(publishData, step, config);
+
+  } catch (error) {
+    logError('[StepExecutor] Publish step failed:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+// 执行实际发布流程
+async function executePublishFlow(data, step, config) {
+  return new Promise((resolve) => {
+    // 设置超时
+    const timeout = setTimeout(() => {
+      resolve({
+        success: false,
+        error: 'Publish timeout after 5 minutes'
+      });
+    }, 5 * 60 * 1000);
+
+    // 监听发布结果
+    const resultListener = (message, sender, sendResponse) => {
+      if (message.action === 'PUBLISH_RESULT' && message.taskId === data.taskId) {
+        clearTimeout(timeout);
+        chrome.runtime.onMessage.removeListener(resultListener);
+
+        log('[StepExecutor] Received publish result:', message);
+
+        if (message.success) {
+          resolve({
+            success: true,
+            output: {
+              note_id: message.feedId || message.noteId || 'unknown',
+              note_url: message.noteUrl || null,
+              published_at: new Date().toISOString()
+            }
+          });
+        } else {
+          resolve({
+            success: false,
+            error: message.message || 'Publish failed'
+          });
+        }
+      }
+    };
+
+    chrome.runtime.onMessage.addListener(resultListener);
+
+    // 触发发布流程
+    handlePublishCommand(data);
+  });
+}
+
+// Real fetch_metrics handler - Phase 2: 主动抓取数据
+async function executeFetchMetricsHandler(step, config) {
+  log('[StepExecutor] Executing fetch_metrics step...');
+
+  const noteId = step.input_snapshot?.note_id;
+  const feedId = step.input_snapshot?.feed_id;
+  const titleHash = step.input_snapshot?.title_hash;
+  const metricsWindow = step.input_snapshot?.metrics_window || '24h';
+
+  // 如果没有有效的标识符，返回空数据
+  if (!feedId && !titleHash && (!noteId || noteId === 'unknown' || noteId.startsWith('mock_'))) {
+    log('[StepExecutor] No valid identifier for fetch_metrics, returning empty data');
+    return {
+      success: true,
+      output: {
+        note_id: noteId || 'unknown',
+        metrics_window: metricsWindow,
+        fetched_at: new Date().toISOString(),
+        likes: 0,
+        collects: 0,
+        comments: 0,
+        views: 0,
+        impressions: 0,
+        mock: true,
+        reason: 'no_valid_identifier'
+      }
+    };
+  }
+
+  try {
+    log('[StepExecutor] Starting active metrics fetch...');
+    log('[StepExecutor] Target:', { feedId, titleHash, noteId });
+
+    // 1. 打开小红书创作者中心统计页面
+    const statisticsUrl = 'https://creator.xiaohongshu.com/statistics/data-analysis';
+
+    log('[StepExecutor] Opening statistics page:', statisticsUrl);
+
+    const tab = await chrome.tabs.create({
+      url: statisticsUrl,
+      active: false  // 后台打开，不干扰用户
+    });
+
+    log('[StepExecutor] Tab created:', tab.id);
+
+    // 2. 等待页面加载完成
+    await new Promise((resolve) => {
+      const checkLoaded = () => {
+        chrome.tabs.get(tab.id, (tabInfo) => {
+          if (chrome.runtime.lastError) {
+            resolve(); // Tab 可能已关闭
+            return;
+          }
+          if (tabInfo.status === 'complete') {
+            resolve();
+          } else {
+            setTimeout(checkLoaded, 500);
+          }
+        });
+      };
+      setTimeout(checkLoaded, 1000);
+    });
+
+    log('[StepExecutor] Page loaded, waiting for data table...');
+
+    // 3. 等待额外时间让数据表格渲染
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    // 4. 注入脚本抓取数据
+    log('[StepExecutor] Injecting scraper script...');
+
+    const scrapeResult = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (targetFeedId, targetTitleHash) => {
+        // 这个函数在页面上下文中执行
+        console.log('[Prome Scraper] Starting scrape for:', { targetFeedId, targetTitleHash });
+
+        try {
+          // 查找数据表格
+          const table = document.querySelector('table');
+          if (!table) {
+            return { success: false, error: 'Table not found' };
+          }
+
+          const rows = table.querySelectorAll('tbody tr');
+          console.log('[Prome Scraper] Found rows:', rows.length);
+
+          const allNotes = [];
+
+          for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const cells = row.querySelectorAll('td');
+            if (cells.length < 5) continue;
+
+            // 提取标题
+            const noteCell = cells[0];
+            const titleEl = noteCell.querySelector('a, .title, [class*="title"]');
+            const title = titleEl ? titleEl.textContent.trim() : '';
+            const noteUrl = titleEl ? titleEl.href : '';
+
+            // 提取 feedId
+            let feedId = '';
+            const patterns = [
+              /\/explore\/([a-f0-9]{24})/i,
+              /\/note\/([a-f0-9]{24})/i,
+              /note_id=([a-f0-9]{24})/i,
+              /[?&]id=([a-f0-9]{24})/i
+            ];
+
+            for (const pattern of patterns) {
+              const match = noteUrl.match(pattern);
+              if (match) {
+                feedId = match[1];
+                break;
+              }
+            }
+
+            // 尝试从详情链接提取
+            if (!feedId) {
+              const lastCell = cells[cells.length - 1];
+              const detailLink = lastCell.querySelector('a');
+              if (detailLink && detailLink.href) {
+                for (const pattern of patterns) {
+                  const match = detailLink.href.match(pattern);
+                  if (match) {
+                    feedId = match[1];
+                    break;
+                  }
+                }
+              }
+            }
+
+            // 生成 title hash
+            const normalizedTitle = (title || '').substring(0, 20).toLowerCase().replace(/\s/g, '');
+            const titleHash = `${normalizedTitle}_`;
+
+            // 解析数字
+            const parseNum = (text) => {
+              if (!text) return 0;
+              text = text.toString().trim();
+              if (text === '-' || text === '' || text === '--') return 0;
+              text = text.replace('+', '');
+              if (text.includes('万')) return Math.round(parseFloat(text.replace('万', '')) * 10000);
+              if (text.toLowerCase().includes('k')) return Math.round(parseFloat(text.replace(/k/i, '')) * 1000);
+              if (text.includes('%')) return parseFloat(text.replace('%', ''));
+              return parseInt(text.replace(/,/g, ''), 10) || 0;
+            };
+
+            // 提取数据
+            const noteData = {
+              title,
+              feedId,
+              titleHash,
+              impressions: parseNum(cells[1]?.textContent),
+              views: parseNum(cells[2]?.textContent),
+              clickRate: parseNum(cells[3]?.textContent),
+              likes: parseNum(cells[4]?.textContent),
+              comments: parseNum(cells[5]?.textContent),
+              collects: parseNum(cells[6]?.textContent)
+            };
+
+            allNotes.push(noteData);
+          }
+
+          console.log('[Prome Scraper] Extracted notes:', allNotes.length);
+
+          // 查找目标笔记
+          let targetNote = null;
+
+          if (targetFeedId) {
+            targetNote = allNotes.find(n => n.feedId === targetFeedId);
+          }
+
+          if (!targetNote && targetTitleHash) {
+            targetNote = allNotes.find(n => n.titleHash.startsWith(targetTitleHash.substring(0, 10)));
+          }
+
+          if (targetNote) {
+            console.log('[Prome Scraper] Found target note:', targetNote);
+            return { success: true, data: targetNote, allNotes };
+          } else {
+            console.log('[Prome Scraper] Target not found, returning all notes');
+            return { success: true, data: null, allNotes, message: 'Target not found' };
+          }
+
+        } catch (error) {
+          console.error('[Prome Scraper] Error:', error);
+          return { success: false, error: error.message };
+        }
+      },
+      args: [feedId || '', titleHash || '']
+    });
+
+    // 5. 关闭标签页
+    try {
+      await chrome.tabs.remove(tab.id);
+      log('[StepExecutor] Tab closed');
+    } catch (e) {
+      // 忽略关闭错误
+    }
+
+    // 6. 处理结果
+    const result = scrapeResult[0]?.result;
+    log('[StepExecutor] Scrape result:', result);
+
+    if (!result || !result.success) {
+      return {
+        success: false,
+        error: result?.error || 'Scrape failed'
+      };
+    }
+
+    // 如果找到目标笔记
+    if (result.data) {
+      return {
+        success: true,
+        output: {
+          note_id: noteId,
+          feed_id: result.data.feedId,
+          metrics_window: metricsWindow,
+          fetched_at: new Date().toISOString(),
+          impressions: result.data.impressions || 0,
+          views: result.data.views || 0,
+          click_rate: result.data.clickRate || 0,
+          likes: result.data.likes || 0,
+          comments: result.data.comments || 0,
+          collects: result.data.collects || 0,
+          title: result.data.title,
+          source: 'active_fetch'
+        }
+      };
+    }
+
+    // 如果没找到目标但有数据，返回汇总
+    if (result.allNotes && result.allNotes.length > 0) {
+      // 返回最新的笔记数据
+      const latest = result.allNotes[0];
+      return {
+        success: true,
+        output: {
+          note_id: noteId,
+          metrics_window: metricsWindow,
+          fetched_at: new Date().toISOString(),
+          impressions: latest.impressions || 0,
+          views: latest.views || 0,
+          click_rate: latest.clickRate || 0,
+          likes: latest.likes || 0,
+          comments: latest.comments || 0,
+          collects: latest.collects || 0,
+          title: latest.title,
+          source: 'active_fetch_fallback',
+          total_notes_found: result.allNotes.length
+        }
+      };
+    }
+
+    // 没有数据
+    return {
+      success: true,
+      output: {
+        note_id: noteId,
+        metrics_window: metricsWindow,
+        fetched_at: new Date().toISOString(),
+        impressions: 0,
+        views: 0,
+        likes: 0,
+        comments: 0,
+        collects: 0,
+        source: 'active_fetch_empty',
+        reason: 'No notes found on statistics page'
+      }
+    };
+
+  } catch (error) {
+    logError('[StepExecutor] Fetch metrics failed:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+// ==================== Multi-Account Support ====================
+// 矩阵账号支持：动态检测当前登录的小红书账号，查询 xhs_accounts.id
+
+/**
+ * 检测当前登录的小红书账号
+ * 从 Cookie 中提取 x-user-id-creator 或 a1
+ * @returns {Object} { xhsUserId, xhsSessionHash }
+ */
+async function detectCurrentXhsAccount() {
+  try {
+    // 获取小红书相关 cookies
+    const cookies = await chrome.cookies.getAll({ domain: '.xiaohongshu.com' });
+
+    // 提取 x-user-id-creator（用户真实ID）
+    const userIdCookie = cookies.find(c => c.name === 'x-user-id-creator.xiaohongshu.com');
+    const xhsUserId = userIdCookie?.value || null;
+
+    // 生成 session hash（用于备用匹配）
+    const xhsSessionHash = await generateXhsAccountId(cookies);
+
+    log('[MultiAccount] Detected account:', { xhsUserId, xhsSessionHash });
+
+    return { xhsUserId, xhsSessionHash };
+  } catch (error) {
+    logError('[MultiAccount] Failed to detect account:', error);
+    return { xhsUserId: null, xhsSessionHash: null };
+  }
+}
+
+/**
+ * 查询 Supabase 获取 xhs_accounts.id
+ * 通过 xhs_user_id 或 xhs_session_hash 匹配
+ * @returns {string|null} xhs_accounts.id UUID 或 null
+ */
+async function lookupXhsAccountId(xhsUserId, xhsSessionHash) {
+  try {
+    const config = await getSupabaseConfigFromStorage();
+    if (!config.url || !config.key) {
+      log('[MultiAccount] Supabase not configured');
+      return null;
+    }
+
+    // 优先使用 xhs_user_id 查询
+    if (xhsUserId) {
+      const response = await fetch(
+        `${config.url}/rest/v1/xhs_accounts?xhs_user_id=eq.${encodeURIComponent(xhsUserId)}&select=id`,
+        {
+          headers: {
+            'apikey': config.key,
+            'Authorization': `Bearer ${config.key}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      if (response.ok) {
+        const accounts = await response.json();
+        if (accounts.length > 0) {
+          log('[MultiAccount] Found account by xhs_user_id:', accounts[0].id);
+          return accounts[0].id;
+        }
+      }
+    }
+
+    // 如果没有 xhs_user_id 或未找到，返回 null
+    // 用户需要先在前端绑定账号
+    log('[MultiAccount] Account not found in xhs_accounts');
+    return null;
+
+  } catch (error) {
+    logError('[MultiAccount] Lookup failed:', error);
+    return null;
+  }
+}
+
+/**
+ * 初始化 Step Executor（带动态账号检测）
+ */
+async function initStepExecutorWithAccountDetection() {
+  try {
+    // 1. 检测当前登录账号
+    const { xhsUserId, xhsSessionHash } = await detectCurrentXhsAccount();
+
+    if (!xhsUserId && !xhsSessionHash) {
+      log('[StepExecutor] No XHS account detected, executor disabled');
+      return;
+    }
+
+    // 2. 查询 xhs_accounts.id
+    const accountId = await lookupXhsAccountId(xhsUserId, xhsSessionHash);
+
+    if (!accountId) {
+      log('[StepExecutor] Account not bound in Supabase, executor disabled');
+      log('[StepExecutor] User needs to bind account in prome.live first');
+      return;
+    }
+
+    // 3. 保存并初始化
+    await chrome.storage.local.set({
+      xhsAccountUuid: accountId,
+      xhsUserId: xhsUserId,
+      xhsSessionHash: xhsSessionHash
+    });
+
+    initStepExecutor(accountId);
+
+  } catch (error) {
+    logError('[StepExecutor] Init with account detection failed:', error);
+  }
+}
+
+/**
+ * 监听账号变化（Cookie 变化 = 账号切换）
+ */
+chrome.cookies.onChanged.addListener(async (changeInfo) => {
+  // 只关注小红书相关的关键 cookie
+  const criticalCookies = ['web_session', 'a1', 'x-user-id-creator.xiaohongshu.com'];
+
+  if (changeInfo.cookie.domain.includes('xiaohongshu') &&
+    criticalCookies.includes(changeInfo.cookie.name)) {
+    log('[MultiAccount] XHS cookie changed:', changeInfo.cookie.name, changeInfo.cause);
+
+    // 账号可能已切换，重新检测
+    if (changeInfo.cause === 'explicit' || changeInfo.cause === 'overwrite') {
+      // 延迟一点让所有 cookie 都更新完
+      setTimeout(() => {
+        initStepExecutorWithAccountDetection();
+      }, 2000);
+    }
+  }
+});
+
+// 启动时自动检测并初始化
+initStepExecutorWithAccountDetection();
+
+log('[StepExecutor] Multi-account support enabled');
+
+// ==================== Review Mode Confirmation ====================
+
+/**
+ * 监听通知点击事件
+ * 当用户点击发布确认通知时，打开确认弹窗
+ */
+chrome.notifications.onClicked.addListener(async (notificationId) => {
+  log('[ReviewConfirm] Notification clicked:', notificationId);
+
+  // 检查是否是发布确认通知
+  if (notificationId.startsWith('publish_confirm_')) {
+    const stepId = notificationId.replace('publish_confirm_', '');
+
+    // 打开确认页面
+    chrome.windows.create({
+      url: `popup/review-confirm.html?stepId=${stepId}`,
+      type: 'popup',
+      width: 650,
+      height: 600,
+      focused: true
+    });
+
+    // 关闭通知
+    chrome.notifications.clear(notificationId);
+  }
+});
+
+/**
+ * 处理确认/跳过响应
+ */
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'REVIEW_CONFIRM_RESPONSE') {
+    log('[ReviewConfirm] Received response:', message);
+
+    const { stepId, confirmed, data } = message;
+
+    if (confirmed && data) {
+      // 用户确认发布 - 触发发布流程
+      log('[ReviewConfirm] User confirmed publish, triggering flow...');
+
+      const publishData = {
+        taskId: stepId,
+        title: data.title || '',
+        content: data.content || '',
+        images: data.images || [],
+        video: null,
+        videos: [],
+        stepExecutor: true,
+        reviewConfirmed: true
+      };
+
+      // 触发现有的发布流程
+      handlePublishCommand(publishData);
+
+      sendResponse({ success: true, action: 'publishing' });
+    } else {
+      // 用户跳过 - 标记 step 为 skipped
+      log('[ReviewConfirm] User skipped publish');
+
+      // 异步更新 step 状态
+      (async () => {
+        try {
+          const config = await getSupabaseConfigFromStorage();
+          if (config.url && config.key) {
+            await fetch(`${config.url}/rest/v1/rpc/finish_task_step`, {
+              method: 'POST',
+              headers: {
+                'apikey': config.key,
+                'Authorization': `Bearer ${config.key}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                p_step_id: stepId,
+                p_status: 'failed',
+                p_output_payload: { skipped: true, reason: 'user_skipped' },
+                p_usage: {},
+                p_provider: 'prome-extension',
+                p_provider_run_id: null,
+                p_error: { error: 'User skipped manual review' }
+              })
+            });
+            log('[ReviewConfirm] Step marked as skipped');
+          }
+        } catch (error) {
+          logError('[ReviewConfirm] Failed to update step:', error);
+        }
+      })();
+
+      sendResponse({ success: true, action: 'skipped' });
+    }
+
+    return true;  // async response
+  }
+});
+
+log('[ReviewConfirm] Review mode confirmation handlers registered');

@@ -21,7 +21,6 @@
     "https://www.xiaohongshu.com/*",
     "https://*.prome.live/*",
     "https://prome.live/*",
-    "http://localhost:*/*",
     "https://*.zeabur.app/*",
     "https://*.supabase.co/*"
   ],
@@ -34,31 +33,40 @@
       "matches": [
         "https://creator.xiaohongshu.com/publish/*"
       ],
-      "js": ["content.js"],
-      "css": ["content.css"],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
       "run_at": "document_idle"
     },
     {
       "matches": [
         "https://creator.xiaohongshu.com/statistics/*"
       ],
-      "js": ["analytics-collector.js"],
+      "js": [
+        "analytics-collector.js"
+      ],
       "run_at": "document_idle"
     },
     {
       "matches": [
         "https://www.xiaohongshu.com/*"
       ],
-      "js": ["content.js"],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     },
     {
       "matches": [
         "https://*.prome.live/*",
-        "https://prome.live/*",
-        "http://localhost:*/*"
+        "https://prome.live/*"
       ],
-      "js": ["bridge.js"],
+      "js": [
+        "bridge.js"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -72,8 +80,12 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["icons/*"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "icons/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }
