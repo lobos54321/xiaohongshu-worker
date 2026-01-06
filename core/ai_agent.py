@@ -9,6 +9,14 @@ import anthropic
 import requests
 from pydantic import BaseModel
 
+# Supabase for persistent storage
+try:
+    from supabase import create_client, Client
+    SUPABASE_AVAILABLE = True
+except ImportError:
+    SUPABASE_AVAILABLE = False
+    logging.warning("Supabase client not available, falling back to file storage")
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -144,11 +152,46 @@ class AutoContentManager:
         self.content_plans: Dict[str, Dict] = {} # Stores strategy, weeklyPlan, dailyTasks
         self.generation_status: Dict[str, str] = {} # 'idle', 'generating', 'completed', 'failed'
         
+        # Initialize Supabase client
+        self.supabase: Optional[Client] = None
+        if SUPABASE_AVAILABLE:
+            supabase_url = os.getenv("SUPABASE_URL")
+            supabase_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+            if supabase_url and supabase_key:
+                try:
+                    self.supabase = create_client(supabase_url, supabase_key)
+                    logger.info("✅ Supabase client initialized for content persistence")
+                except Exception as e:
+                    logger.error(f"❌ Failed to initialize Supabase client: {e}")
+        
         os.makedirs(self.data_dir, exist_ok=True)
         self._load_persisted_data()
 
     def _load_persisted_data(self):
-        """Load data from JSON files"""
+        """从 Supabase 或本地文件加载持久化数据"""
+        # 优先从 Supabase 加载
+        if self.supabase:
+            try:
+                logger.info("📥 Loading content plans from Supabase...")
+                response = self.supabase.table('xhs_content_plans').select('*').execute()
+                for row in response.data:
+                    user_id = row['user_id']
+                    if row.get('user_profile'):
+                        self.user_profiles[user_id] = UserProfile(**row['user_profile'])
+                    if row.get('daily_tasks') or row.get('strategy'):
+                        self.content_plans[user_id] = {
+                            'strategy': row.get('strategy'),
+                            'weeklyPlan': row.get('weekly_plan'),
+                            'dailyTasks': row.get('daily_tasks', [])
+                        }
+                        self.generation_status[user_id] = row.get('generation_status', 'completed')
+                logger.info(f"✅ Loaded {len(response.data)} content plans from Supabase")
+                return
+            except Exception as e:
+                logger.error(f"❌ Failed to load from Supabase: {e}")
+                # Fallback to file storage
+        
+        # Fallback: 从本地文件加载
         try:
             if not os.path.exists(self.data_dir):
                 return
@@ -162,23 +205,50 @@ class AutoContentManager:
                             self.user_profiles[user_id] = UserProfile(**data["userProfile"])
                         if "contentPlan" in data:
                             self.content_plans[user_id] = data["contentPlan"]
-                            # Restore status if it was completed
                             self.generation_status[user_id] = 'completed'
         except Exception as e:
             logger.error(f"Failed to load persisted data: {e}")
 
     def _save_data(self, user_id: str):
-        """Save user data to JSON file"""
+        """保存用户数据到 Supabase 和本地文件"""
+        user_profile = self.user_profiles.get(user_id)
+        content_plan = self.content_plans.get(user_id)
+        status = self.generation_status.get(user_id, 'idle')
+        
+        # 保存到 Supabase
+        if self.supabase:
+            try:
+                data = {
+                    'user_id': user_id,
+                    'user_profile': user_profile.dict() if user_profile else None,
+                    'strategy': content_plan.get('strategy') if content_plan else None,
+                    'weekly_plan': content_plan.get('weeklyPlan') if content_plan else None,
+                    'daily_tasks': content_plan.get('dailyTasks', []) if content_plan else [],
+                    'generation_status': status,
+                    'updated_at': datetime.now().isoformat()
+                }
+                
+                # Upsert (insert or update)
+                self.supabase.table('xhs_content_plans').upsert(
+                    data, 
+                    on_conflict='user_id'
+                ).execute()
+                
+                logger.info(f"✅ Saved content plan for {user_id} to Supabase")
+            except Exception as e:
+                logger.error(f"❌ Failed to save to Supabase: {e}")
+        
+        # 同时保存到本地文件作为备份
         try:
             data = {
-                "userProfile": self.user_profiles.get(user_id).dict() if user_id in self.user_profiles else None,
-                "contentPlan": self.content_plans.get(user_id),
+                "userProfile": user_profile.dict() if user_profile else None,
+                "contentPlan": content_plan,
                 "savedAt": datetime.now().isoformat()
             }
             with open(os.path.join(self.data_dir, f"{user_id}.json"), 'w') as f:
                 json.dump(data, f, indent=2, default=str)
         except Exception as e:
-            logger.error(f"Failed to save data for {user_id}: {e}")
+            logger.error(f"Failed to save local backup for {user_id}: {e}")
 
     async def start_auto_mode(self, profile_data: Dict):
         """Start the auto content generation process"""
